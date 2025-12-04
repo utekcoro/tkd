@@ -21,7 +21,7 @@ class BarangMasukController extends Controller
             return back()->with('error', 'Cabang tidak valid.');
         }
 
-        $branch = \App\Models\Branch::find(session('active_branch'));
+        $branch = Branch::find(session('active_branch'));
 
         $barangMasuk = BarangMasuk::with(['barcode' => function ($query) use ($branch) {
             if ($branch) {

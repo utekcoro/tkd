@@ -21,6 +21,7 @@ class ApprovalStock extends Model
      */
     protected $fillable = [
         'barcode',
+        'kode_customer',
         'nama',
         'npl',
         'no_invoice',
@@ -69,7 +70,7 @@ class ApprovalStock extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['barcode', 'nama', 'npl', 'no_invoice', 'kontrak', 'status', 'id_pb', 'panjang', 'harga_unit']) // Log field yang ada di ApprovalStock
+            ->logOnly(['barcode', 'kode_customer', 'nama', 'npl', 'no_invoice', 'kontrak', 'status', 'id_pb', 'panjang', 'harga_unit']) // Log field yang ada di ApprovalStock
             ->logOnlyDirty() // Hanya log perubahan yang benar-benar terjadi
             ->dontSubmitEmptyLogs() // Jangan submit log kosong
             ->useLogName('Pembaruan Data Approval Stock') // Set log name sesuai permintaan
@@ -117,6 +118,7 @@ class ApprovalStock extends Model
                     'event_type' => 'created',
                     'created_data' => [
                         'barcode' => $this->barcode,
+                        'kode_customer' => $this->kode_customer,
                         'nama' => $this->nama,
                         'npl' => $this->npl,
                         'no_invoice' => $this->no_invoice,

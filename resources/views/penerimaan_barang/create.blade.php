@@ -1,0 +1,953 @@
+@extends('layout.main')
+
+@section('content')
+<div class="content-wrapper">
+    <!-- Content Header -->
+    <div class="content-header">
+        <div class="container-fluid">
+            <div class="card">
+                <form id="penerimaanForm" action="{{ route('penerimaan-barang.store') }}" class="p-3 space-y-3" method="post">
+                    <div id="laravel-errors"
+                        @if(session('error'))
+                        data-error="{{ session('error') }}"
+                        @endif
+                        @if($errors->any())
+                        data-validation-errors="{{ json_encode($errors->all()) }}"
+                        @endif
+                        ></div>
+                    @csrf
+                    <!-- Hidden input untuk menyimpan status form -->
+                    <input type="hidden" id="form_submitted" name="form_submitted" value="0">
+
+                    <div class="grid grid-cols-[150px_1fr] gap-y-4 gap-x-4 text-sm items-start">
+                        <!-- Form Nomor PO -->
+                        <label for="no_po" class="text-gray-800 font-medium flex items-center">
+                            Nomor PO <span class="text-red-600 ml-1">*</span>
+                            <span class="ml-1"
+                                data-toggle="tooltip"
+                                data-placement="top"
+                                title="Silakan cari & pilih nomor purchase order dari dropdown"
+                                style="cursor: help;">
+                                <i class="fas fa-info-circle"></i>
+                            </span>
+                        </label>
+
+                        <div class="relative max-w-md w-full">
+                            <div class="flex items-center border border-gray-300 rounded overflow-hidden max-w-[300px]">
+                                <input
+                                    id="no_po"
+                                    name="no_po"
+                                    type="search"
+                                    placeholder="Cari/Pilih Nomor Purchase Order..."
+                                    class="flex-grow px-2 py-1 outline-none text-sm"
+                                    required />
+                                <button type="button" id="no-po-search-btn" class="px-2 text-gray-600 hover:text-gray-900">
+                                    <i class="fas fa-search"></i>
+                                </button>
+                            </div>
+                            <!-- Dropdown akan muncul di sini -->
+                            <div id="dropdown-no-po" class="absolute left-0 right-0 z-10 bg-white border border-gray-300 rounded shadow mt-1 hidden max-h-40 overflow-y-auto text-sm max-w-[300px]">
+
+                            </div>
+                        </div>
+
+                        <!-- Form Nomor Pemesanan Barang -->
+                        <label for="npb" class="text-gray-800 font-medium flex items-center">
+                            Nomor Form <span class="text-red-600 ml-1">*</span>
+                        </label>
+                        <input
+                            id="npb"
+                            name="npb"
+                            type="text"
+                            value="{{ $npb }}"
+                            class="border border-gray-300 rounded px-2 py-1 w-full max-w-[300px] bg-[#f3f4f6]"
+                            required readonly />
+
+                        <!-- Form Pemasok -->
+                        <label for="vendor" class="text-gray-800 font-medium flex items-center">
+                            Terima dari <span class="text-red-600 ml-1">*</span>
+                        </label>
+                        <input
+                            id="vendor"
+                            name="vendor"
+                            type="text"
+                            placeholder="Vendor Terisi Otomatis"
+                            value="{{ $vendor ?? '' }}"
+                            class="border border-gray-300 rounded px-2 py-1 w-full max-w-[300px] bg-[#f3f4f6]"
+                            required readonly />
+
+                        <!-- Form Tanggal -->
+                        <label for="tanggal" class="text-gray-800 font-medium flex items-center">
+                            Tanggal <span class="text-red-600 ml-1">*</span>
+                        </label>
+                        <input
+                            id="tanggal"
+                            name="tanggal"
+                            type="date"
+                            value="{{ date('d-m-Y') }}"
+                            class="border border-gray-300 rounded px-2 py-1 max-w-[300px] w-full"
+                            required />
+
+                        <!-- Form No Terima -->
+                        <label for="no_terima" class="text-gray-800 font-medium flex items-center">
+                            No Terima # <span class="text-red-600 ml-1">*</span>
+                            <span class="ml-1"
+                                data-toggle="tooltip"
+                                data-placement="top"
+                                title="Silakan isi nomor terima dengan nomor invoice yang tertera di faktur pembelian"
+                                style="cursor: help;">
+                                <i class="fas fa-info-circle"></i>
+                            </span>
+                        </label>
+                        <!-- Input + Button Save -->
+                        <div class="flex justify-between items-center gap-2 max-w-full">
+                            <input
+                                id="no_terima"
+                                name="no_terima"
+                                type="text"
+                                class="border border-gray-300 rounded px-2 py-1 w-full max-w-[300px]"
+                                required />
+
+                            <button
+                                type="button"
+                                id="lanjut-btn"
+                                onclick="handleLanjutClick(event)"
+                                class="bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700 text-sm">
+                                Lanjut
+                            </button>
+
+                            <button
+                                type="button"
+                                id="save-btn"
+                                onclick="handleSaveClick(event)"
+                                class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 text-sm font-medium hidden">
+                                <i class="fas fa-save mr-2"></i>Save
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                <!-- Table container -->
+                <div class="p-2 flex flex-col gap-4">
+                    <div class="border border-gray-300 rounded overflow-hidden text-sm">
+                        <div class="flex justify-between items-center border border-gray-300 rounded-t bg-[#f9f9f9] px-2 py-2 text-sm">
+                            <!-- Search kiri -->
+                            <div class="flex items-center border rounded px-2 py-1 w-[280px]">
+                                <input
+                                    id="search-barang"
+                                    class="flex-grow outline-none placeholder-gray-400"
+                                    placeholder="Cari/Pilih Barang & Jasa..."
+                                    type="text" />
+                                <i class="fas fa-search text-gray-500 ml-2"></i>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <!-- Label kanan -->
+                                <div class="text-gray-800 font-semibold text-base whitespace-nowrap">
+                                    Rincian Barang <span class="text-red-600">*</span>
+                                </div>
+                            </div>
+                        </div>
+                        <table class="w-full border-collapse border border-gray-400 text-xs text-center">
+                            <thead class="bg-[#607d8b] text-white">
+                                <tr>
+                                    <th class="border border-gray-400 w-6">
+                                        <i class="fas fa-sort">
+                                        </i>
+                                    </th>
+                                    <th class="border border-gray-400 px-2 py-1 text-left">
+                                        Nama Barang
+                                    </th>
+                                    <th class="border border-gray-400 px-2 py-1">
+                                        Kode #
+                                    </th>
+                                    <th class="border border-gray-400 px-2 py-1">
+                                        Kuantitas
+                                    </th>
+                                    <th class="border border-gray-400 px-2 py-1">
+                                        Satuan
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-barang-body" class="bg-white">
+                                @if (isset($barang) && count($barang) > 0)
+                                @php
+                                    // Sort data by nama_barang ascending (A-Z)
+                                    $sortedBarang = collect($barang)->sortBy('nama_barang')->values()->all();
+                                @endphp
+                                @foreach ($sortedBarang as $item)
+                                <tr>
+                                    <td class="border border-gray-400 px-2 py-3 text-left align-top">
+                                        ≡
+                                    </td>
+                                    <td class="border border-gray-400 px-2 py-3 text-left align-top">
+                                        {{ $item['nama_barang'] }}
+                                    </td>
+                                    <td class="border border-gray-400 px-2 py-3 align-top">
+                                        {{ $item['kode_barang'] }}
+                                    </td>
+                                    <td class="border border-gray-400 px-2 py-3 align-top">
+                                        {{ $item['availableToSell'] }}
+                                    </td>
+                                    <td class="border border-gray-400 px-2 py-3 align-top">
+                                        {{ $item['unit'] }}
+                                    </td>
+                                </tr>
+                                @endforeach
+                                @else
+                                <tr>
+                                    <td class="border border-gray-400 px-2 py-3 text-left align-top">
+                                        ≡
+                                    </td>
+                                    <td class="border border-gray-400 px-2 py-3 text-center align-top" colspan="4">
+                                        Belum ada data
+                                    </td>
+                                </tr>
+                                @endif
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const nomor_po = JSON.parse(`{!! addslashes(json_encode($purchase_order)) !!}`);
+
+    console.log('Nomor PO data:', nomor_po);
+
+    // Variabel untuk menyimpan data form
+    let formData = {
+        no_po: '',
+        npb: '',
+        vendor: '',
+        tanggal: '',
+        no_terima: ''
+    };
+
+    // Flag untuk mencegah form submit tidak diinginkan
+    let isFormLocked = false;
+    let isDetailFormReady = false;
+
+    // Function untuk handle tombol Lanjut
+    function handleLanjutClick(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const noPOInput = document.getElementById('no_po');
+        const npbInput = document.getElementById('npb');
+        const vendorInput = document.getElementById('vendor');
+        const tanggalInput = document.getElementById('tanggal');
+        const noTerimaInput = document.getElementById('no_terima');
+
+        console.log('Lanjut button clicked');
+        console.log('No PO:', noPOInput.value);
+        console.log('NPB:', npbInput.value);
+        console.log('Vendor:', vendorInput.value);
+        console.log('Tanggal:', tanggalInput.value);
+        console.log('No Terima:', noTerimaInput.value);
+
+        // Validasi form
+        if (!noPOInput.value.trim() || !npbInput.value.trim() || !tanggalInput.value.trim() || !noTerimaInput.value.trim()) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Field Tidak Lengkap',
+                text: 'Harap lengkapi semua field yang wajib diisi!',
+                timer: 3000,
+                timerProgressBar: true,
+                showConfirmButton: false,
+                toast: true,
+                position: 'top-end'
+            });
+            return false;
+        }
+
+        // Simpan data form sementara
+        formData.no_po = noPOInput.value;
+        formData.npb = npbInput.value;
+        formData.vendor = vendorInput.value;
+        formData.tanggal = tanggalInput.value;
+        formData.no_terima = noTerimaInput.value;
+
+        console.log('Form data saved temporarily:', formData);
+
+        // Tampilkan loading state pada tombol
+        const lanjutBtn = document.getElementById('lanjut-btn');
+        const originalText = lanjutBtn.textContent;
+        lanjutBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Loading...';
+        lanjutBtn.disabled = true;
+
+        // Set form menjadi readonly
+        setFormReadonly(true);
+        isFormLocked = true;
+
+        // Panggil function untuk mengambil detail PO
+        fetchDetailPO(formData.no_po, formData.npb, formData.no_terima)
+            .then(() => {
+                console.log('Detail PO berhasil dimuat');
+                // Setelah berhasil, tombol Save akan ditampilkan di setFormReadonly(true)
+            })
+            .catch(error => {
+                console.error('Error loading detail PO:', error);
+                // Jika error, kembalikan form ke state editable
+                setFormReadonly(false);
+                isFormLocked = false;
+                lanjutBtn.textContent = originalText;
+                lanjutBtn.disabled = false;
+            });
+
+        return false;
+    }
+
+    // Function untuk mengambil detail PO dengan AJAX
+    function fetchDetailPO(noPO, npb, noTerima) {
+        return new Promise((resolve, reject) => {
+            // Tampilkan loading indicator
+            const tableBody = document.getElementById('table-barang-body');
+            tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4"><i class="fas fa-spinner fa-spin mr-2"></i>Loading data...</td></tr>';
+
+            // Siapkan data untuk request
+            const data = new FormData();
+            data.append('no_po', noPO);
+            data.append('npb', npb);
+            data.append('no_terima', noTerima);
+
+            // Tambahkan CSRF token
+            data.append('_token', document.querySelector('meta[name="csrf-token"]').getAttribute('content'));
+
+            // Kirim AJAX request
+            fetch('/purchase-orders/detail', {
+                    method: 'POST',
+                    body: data,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                })
+                .then(response => {
+                    // Cek jika response tidak ok (status 4xx atau 5xx)
+                    if (!response.ok) {
+                        return response.json().then(errorData => {
+                            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Detail PO data received:', data);
+                    console.log('Vendor data structure:', data.vendor);
+
+                    // Update vendor jika ada
+                    if (data.vendor && data.vendor.vendorNo) {
+                        const vendorInput = document.getElementById('vendor');
+                        vendorInput.value = data.vendor.vendorNo;
+
+                        // PENTING: Update formData.vendor setelah mendapat data dari server
+                        formData.vendor = data.vendor.vendorNo;
+                        console.log('Vendor updated in formData:', formData.vendor);
+                    }
+
+                    // Tampilkan data barang di tabel
+                    updateBarangTable(data.barang);
+
+                    // Tampilkan tombol Save
+                    document.getElementById('save-btn').classList.remove('hidden');
+
+                    resolve(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching detail PO:', error);
+
+                    // Tampilkan error dengan SweetAlert
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error!',
+                        text: error.message || 'Terjadi kesalahan saat mengambil data',
+                        timer: 4000,
+                        timerProgressBar: true,
+                        showConfirmButton: false,
+                        toast: true,
+                        position: 'top-end'
+                    });
+
+                    // Update tabel dengan pesan error
+                    tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-600">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>Error: ${error.message || 'Terjadi kesalahan'}
+                </td></tr>`;
+
+                    reject(error);
+                });
+        });
+    }
+
+    // Function untuk update tabel barang
+    function updateBarangTable(items) {
+        const tableBody = document.getElementById('table-barang-body');
+        tableBody.innerHTML = '';
+
+        if (items && items.length > 0) {
+            // Sort items by nama_barang ascending (A-Z)
+            const sortedItems = items.sort((a, b) => {
+                const namaA = (a.nama_barang || '').toLowerCase();
+                const namaB = (b.nama_barang || '').toLowerCase();
+                return namaA.localeCompare(namaB);
+            });
+
+            sortedItems.forEach(item => {
+                const row = document.createElement('tr');
+
+                // Kolom handle
+                const handleCell = document.createElement('td');
+                handleCell.className = 'border border-gray-400 px-2 py-3 text-left align-top';
+                handleCell.textContent = '≡';
+                row.appendChild(handleCell);
+
+                // Kolom nama barang
+                const namaCell = document.createElement('td');
+                namaCell.className = 'border border-gray-400 px-2 py-3 text-left align-top';
+                namaCell.textContent = item.nama_barang || '-';
+                row.appendChild(namaCell);
+
+                // Kolom kode barang
+                const kodeCell = document.createElement('td');
+                kodeCell.className = 'border border-gray-400 px-2 py-3 align-top';
+                kodeCell.textContent = item.kode_barang || '-';
+                row.appendChild(kodeCell);
+
+                // Kolom kuantitas
+                const qtyCell = document.createElement('td');
+                qtyCell.className = 'border border-gray-400 px-2 py-3 align-top';
+                qtyCell.textContent = item.panjang_total || item.availableToSell || '0';
+                row.appendChild(qtyCell);
+
+                // Kolom satuan
+                const unitCell = document.createElement('td');
+                unitCell.className = 'border border-gray-400 px-2 py-3 align-top';
+                unitCell.textContent = item.unit || '-';
+                row.appendChild(unitCell);
+
+                tableBody.appendChild(row);
+            });
+        } else {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.className = 'border border-gray-400 px-2 py-3 text-center align-top';
+            cell.colSpan = 5;
+            cell.innerHTML = '<i class="fas fa-info-circle mr-2"></i>Tidak ada data barang yang cocok';
+            row.appendChild(cell);
+            tableBody.appendChild(row);
+        }
+    }
+
+    // Function untuk handle tombol Save (menggunakan form submit biasa)
+    function handleSaveClick(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        // Pastikan data form tersedia
+        if (!formData.npb || !formData.no_po) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Data Tidak Lengkap',
+                text: 'Data form tidak lengkap. Silakan klik tombol Lanjut terlebih dahulu.',
+                timer: 3000,
+                timerProgressBar: true,
+                showConfirmButton: false,
+                toast: true,
+                position: 'top-end'
+            });
+            return false;
+        }
+
+        console.log('Submitting form with data:', formData);
+
+        // Tampilkan konfirmasi sebelum save
+        Swal.fire({
+            title: 'Konfirmasi Simpan',
+            text: 'Apakah Anda yakin ingin menyimpan data penerimaan barang ini?',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#3085d6',
+            cancelButtonColor: '#d33',
+            confirmButtonText: 'Ya, Simpan!',
+            cancelButtonText: 'Batal'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Tampilkan loading indicator
+                const saveBtn = document.getElementById('save-btn');
+                const originalText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Menyimpan...';
+                saveBtn.disabled = true;
+
+                // Pastikan semua input memiliki nilai yang benar sebelum submit
+                document.getElementById('no_po').value = formData.no_po;
+                document.getElementById('npb').value = formData.npb;
+                document.getElementById('vendor').value = formData.vendor;
+                document.getElementById('tanggal').value = formData.tanggal;
+                document.getElementById('no_terima').value = formData.no_terima;
+
+                // Set hidden input untuk menandai bahwa form sudah siap disubmit
+                document.getElementById('form_submitted').value = '1';
+
+                // Ambil form element
+                const form = document.getElementById('penerimaanForm');
+
+                if (form) {
+                    // Unlock form untuk submit
+                    isFormLocked = false;
+
+                    console.log('Submitting form to:', form.action);
+
+                    // Submit form
+                    form.submit();
+                } else {
+                    console.error('Form element not found');
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error!',
+                        text: 'Form tidak ditemukan. Silakan reload halaman.',
+                        timer: 4000,
+                        timerProgressBar: true,
+                        showConfirmButton: false,
+                        toast: true,
+                        position: 'top-end'
+                    });
+
+                    // Restore tombol save jika error
+                    saveBtn.innerHTML = originalText;
+                    saveBtn.disabled = false;
+                }
+            }
+        });
+
+        return false;
+    }
+
+    // Function untuk show dropdown PO
+    function showDropdownPO(input) {
+        const dropdownPO = document.getElementById('dropdown-no-po');
+        const query = input.value.toLowerCase().trim();
+
+        console.log('Searching PO with query:', query);
+
+        // Jika query kosong, panggil showAllPO
+        if (query === '') {
+            showAllPO();
+            return;
+        }
+
+        const resultPO = nomor_po.filter(po =>
+            po.number_po.toLowerCase().includes(query) ||
+            po.date_po.toLowerCase().includes(query)
+        );
+
+        dropdownPO.innerHTML = '';
+
+        if (resultPO.length === 0) {
+            const noResultItem = document.createElement('div');
+            noResultItem.className = 'px-3 py-2 text-center text-gray-500 border-b';
+            noResultItem.innerHTML = `<i class="fas fa-search mr-2"></i>Tidak ada PO yang cocok dengan "${query}"`;
+            dropdownPO.appendChild(noResultItem);
+        } else {
+            // Tambahkan header hasil pencarian
+            const headerItem = document.createElement('div');
+            headerItem.className = 'px-3 py-2 bg-blue-50 border-b font-semibold text-sm text-blue-700';
+            headerItem.innerHTML = `<i class="fas fa-search mr-2"></i>Hasil Pencarian: ${resultPO.length} PO`;
+            dropdownPO.appendChild(headerItem);
+
+            resultPO.forEach(po => {
+                const item = document.createElement('div');
+                item.className = 'px-3 py-2 hover:bg-gray-100 cursor-pointer border-b transition-colors duration-150';
+
+                const number = document.createElement('div');
+                number.className = 'font-semibold text-sm text-gray-800';
+                // Highlight matching text
+                const highlightedNumber = po.number_po.replace(
+                    new RegExp(`(${query})`, 'gi'),
+                    '<mark class="bg-yellow-200">$1</mark>'
+                );
+                number.innerHTML = highlightedNumber;
+
+                const date = document.createElement('div');
+                date.className = 'text-sm text-gray-500';
+                date.textContent = po.date_po;
+
+                item.appendChild(number);
+                item.appendChild(date);
+
+                item.onclick = () => {
+                    input.value = po.number_po;
+                    dropdownPO.classList.add('hidden');
+
+                    // Update formData jika diperlukan
+                    formData.no_po = po.number_po;
+
+                    console.log('PO selected from search:', po.number_po);
+                };
+
+                dropdownPO.appendChild(item);
+            });
+        }
+
+        dropdownPO.classList.remove('hidden');
+        console.log('PO dropdown shown with', resultPO.length, 'results');
+    }
+
+    // Function untuk mengatur readonly pada form
+    function setFormReadonly(readonly = true) {
+        const noPOInput = document.getElementById('no_po');
+        const vendorInput = document.getElementById('vendor');
+        const tanggalInput = document.getElementById('tanggal');
+        const noTerimaInput = document.getElementById('no_terima');
+        const dropdownNoPO = document.getElementById('dropdown-no-po');
+        const searchBtnNoPO = document.getElementById('no-po-search-btn');
+        const lanjutBtn = document.getElementById('lanjut-btn');
+        const saveBtn = document.getElementById('save-btn');
+
+        console.log('Setting readonly:', readonly);
+
+        if (readonly) {
+            // Set readonly
+            noPOInput.setAttribute('readonly', 'readonly');
+            noPOInput.readOnly = true;
+
+            vendorInput.setAttribute('readonly', 'readonly');
+            vendorInput.readOnly = true;
+
+            tanggalInput.setAttribute('readonly', 'readonly');
+            tanggalInput.readOnly = true;
+
+            noTerimaInput.setAttribute('readonly', 'readonly');
+            noTerimaInput.readOnly = true;
+
+            // Sembunyikan dropdown dan disable search untuk PO
+            dropdownNoPO.classList.add('hidden');
+            if (searchBtnNoPO) searchBtnNoPO.style.display = 'none';
+
+            // Ubah style input menjadi readonly appearance
+            noPOInput.style.backgroundColor = '#f3f4f6';
+            noPOInput.style.cursor = 'not-allowed';
+            vendorInput.style.backgroundColor = '#f3f4f6';
+            vendorInput.style.cursor = 'not-allowed';
+            tanggalInput.style.backgroundColor = '#f3f4f6';
+            tanggalInput.style.cursor = 'not-allowed';
+            noTerimaInput.style.backgroundColor = '#f3f4f6';
+            noTerimaInput.style.cursor = 'not-allowed';
+
+            // Sembunyikan button Lanjut setelah diklik
+            if (lanjutBtn) lanjutBtn.style.display = 'none';
+            if (saveBtn) saveBtn.classList.remove('hidden');
+
+            isDetailFormReady = true;
+
+            // Set hidden input
+            document.getElementById('form_submitted').value = '1';
+
+            console.log('Form set to readonly');
+        } else {
+            // Remove readonly
+            noPOInput.removeAttribute('readonly');
+            noPOInput.readOnly = false;
+
+            vendorInput.removeAttribute('readonly');
+            vendorInput.readOnly = false;
+
+            tanggalInput.removeAttribute('readonly');
+            tanggalInput.readOnly = false;
+
+            noTerimaInput.removeAttribute('readonly');
+            noTerimaInput.readOnly = false;
+
+            // Enable search untuk PO
+            if (searchBtnNoPO) searchBtnNoPO.style.display = 'block';
+
+            // Remove readonly styling
+            noPOInput.style.backgroundColor = '';
+            noPOInput.style.cursor = '';
+            vendorInput.style.backgroundColor = '';
+            vendorInput.style.cursor = '';
+            tanggalInput.style.backgroundColor = '';
+            tanggalInput.style.cursor = '';
+            noTerimaInput.style.backgroundColor = '';
+            noTerimaInput.style.cursor = '';
+
+            // Show button Lanjut
+            if (lanjutBtn) lanjutBtn.style.display = 'inline-block';
+            if (saveBtn) saveBtn.classList.add('hidden');
+
+            isDetailFormReady = false;
+
+            // Set hidden input
+            document.getElementById('form_submitted').value = '0';
+
+            console.log('Form set to editable');
+        }
+    }
+
+    // Klik di luar dropdown - hanya untuk PO
+    document.addEventListener('click', function(e) {
+        const noPOWrapper = document.getElementById('no_po')?.closest('.relative');
+
+        if (noPOWrapper && !noPOWrapper.contains(e.target)) {
+            document.getElementById('dropdown-no-po')?.classList.add('hidden');
+        }
+    });
+
+    // Initialize form on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        const noPOInput = document.getElementById('no_po');
+        const searchBtnPO = document.getElementById('no-po-search-btn');
+        const vendorInput = document.getElementById('vendor');
+        const tanggalInput = document.getElementById('tanggal');
+        const form = document.getElementById('penerimaanForm');
+
+        console.log('Initializing form...');
+        console.log('No PO Input:', noPOInput);
+        console.log('Vendor Input:', vendorInput);
+        // Initialize tooltips
+        $('[data-toggle="tooltip"]').tooltip();
+
+        if (searchBtnPO) {
+            searchBtnPO.addEventListener('click', handleSearchPOClick);
+            console.log('Search PO button event listener added');
+        }
+
+        // Setup event listener untuk no_po input
+        if (noPOInput) {
+            noPOInput.addEventListener('input', () => {
+                console.log('PO input changed:', noPOInput.value);
+                if (!noPOInput.readOnly && !noPOInput.hasAttribute('readonly')) {
+                    showDropdownPO(noPOInput);
+                }
+            });
+
+            // Event listener untuk focus - tampilkan semua jika kosong
+            noPOInput.addEventListener('focus', () => {
+                console.log('PO input focused');
+                if (!noPOInput.readOnly && !noPOInput.hasAttribute('readonly')) {
+                    if (noPOInput.value.trim() === '') {
+                        showAllPO();
+                    } else {
+                        showDropdownPO(noPOInput);
+                    }
+                }
+            });
+
+            // Event listener untuk keydown - ESC untuk menutup dropdown
+            noPOInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    const dropdownPO = document.getElementById('dropdown-no-po');
+                    dropdownPO.classList.add('hidden');
+                }
+            });
+        }
+
+        // Set tanggal default
+        if (tanggalInput) {
+            const today = new Date().toISOString().split('T')[0];
+            tanggalInput.value = today;
+            formData.tanggal = today;
+        }
+
+        // Prevent normal form submission, hanya biarkan melalui button Lanjut
+        if (form) {
+            form.addEventListener('submit', function(e) {
+                if (!isFormLocked) {
+                    // Jika form belum di-lock, prevent submit
+                    e.preventDefault();
+                    return false;
+                }
+                // Jika sudah locked via button Lanjut, biarkan submit normal
+                console.log('Form submitted to server');
+            });
+        }
+
+        // Check if form was previously submitted (after page refresh or reload)
+        const noPofromServer = '{{ request("no_po") }}';
+        const npbFromServer = '{{ request("npb") }}';
+        const vendorFromServer = '{{ request("vendor") }}';
+        const tanggalFromServer = '{{ request("tanggal") }}';
+        const noTerimaFromServer = '{{ request("no_terima") }}';
+        const formSubmittedFromServer = '{{ request("form_submitted") }}';
+
+        if (formSubmittedFromServer === '1' && noPofromServer && npbFromServer && vendorFromServer && tanggalFromServer && noTerimaFromServer) {
+            // Restore form data
+            formData.no_po = noPofromServer;
+            formData.npb = npbFromServer;
+            formData.vendor = vendorFromServer;
+            formData.tanggal = tanggalFromServer;
+            formData.no_terima = noTerimaFromServer;
+
+            // Set form values
+            if (document.getElementById('npb')) document.getElementById('npb').value = npbFromServer;
+            if (vendorInput) vendorInput.value = vendorFromServer;
+            if (tanggalInput) tanggalInput.value = tanggalFromServer;
+            if (document.getElementById('no_terima')) document.getElementById('no_terima').value = noTerimaFromServer;
+            if (noPOInput) noPOInput.value = noPofromServer;
+
+            // Set form to readonly
+            setFormReadonly(true);
+            isFormLocked = true;
+
+            console.log('Form restored from server with values:', formData);
+        }
+
+        console.log('DOM Content Loaded, form initialized');
+    });
+
+    // Fungsi untuk filter table barang berdasarkan input
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchInput = document.getElementById('search-barang');
+        const tableBody = document.getElementById('table-barang-body');
+        const errorContainer = document.getElementById('laravel-errors');
+
+        if (errorContainer) {
+            // Cek untuk session 'error'
+            const sessionError = errorContainer.dataset.error;
+            if (sessionError) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Gagal!',
+                    text: sessionError, // Ambil teks langsung dari atribut data
+                    timer: 4000,
+                    timerProgressBar: true,
+                    showConfirmButton: false,
+                    toast: true,
+                    position: 'top-end'
+                });
+            }
+
+            // Cek untuk error validasi
+            const validationErrors = errorContainer.dataset.validationErrors;
+            if (validationErrors) {
+                // Ubah string JSON kembali menjadi array JavaScript
+                const errorList = JSON.parse(validationErrors);
+                let errorMessages = '';
+                errorList.forEach(error => {
+                    errorMessages += `${error}`;
+                });
+
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Validasi Gagal',
+                    html: `<ul class="text-left list-disc list-inside">${errorMessages}</ul>`,
+                    timer: 5000,
+                    timerProgressBar: true,
+                    showConfirmButton: false,
+                    toast: true,
+                    position: 'top-end'
+                });
+            }
+        }
+
+        if (searchInput && tableBody) {
+            searchInput.addEventListener('input', function() {
+                const keyword = searchInput.value.toLowerCase();
+                const rows = tableBody.querySelectorAll('tr');
+
+                rows.forEach(row => {
+                    const columns = row.querySelectorAll('td');
+                    const textContent = Array.from(columns)
+                        .map(td => td.textContent.toLowerCase())
+                        .join(' ');
+
+                    if (textContent.includes(keyword)) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+            });
+        }
+    });
+
+    // Function untuk handle tombol search PO
+    function handleSearchPOClick(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const noPOInput = document.getElementById('no_po');
+        const dropdownPO = document.getElementById('dropdown-no-po');
+
+        console.log('Search PO button clicked');
+        console.log('Current input value:', noPOInput.value);
+
+        // Jika input kosong atau hanya whitespace, tampilkan semua PO
+        const query = noPOInput.value.trim();
+
+        if (query === '') {
+            console.log('Input kosong, menampilkan semua PO');
+            showAllPO();
+        } else {
+            console.log('Input tidak kosong, melakukan pencarian dengan query:', query);
+            showDropdownPO(noPOInput);
+        }
+    }
+
+    // Function untuk menampilkan semua PO
+    function showAllPO() {
+        const dropdownPO = document.getElementById('dropdown-no-po');
+
+        console.log('Menampilkan semua PO, total:', nomor_po.length);
+
+        dropdownPO.innerHTML = '';
+
+        if (nomor_po.length === 0) {
+            const noDataItem = document.createElement('div');
+            noDataItem.className = 'px-3 py-2 text-center text-gray-500 border-b';
+            noDataItem.innerHTML = '<i class="fas fa-info-circle mr-2"></i>Tidak ada data PO';
+            dropdownPO.appendChild(noDataItem);
+        } else {
+            // Tambahkan header info
+            const headerItem = document.createElement('div');
+            headerItem.className = 'px-3 py-2 bg-gray-50 border-b font-semibold text-sm text-gray-700';
+            headerItem.innerHTML = `<i class="fas fa-list mr-2"></i>Semua Nomor PO (${nomor_po.length})`;
+            dropdownPO.appendChild(headerItem);
+
+            // Tampilkan semua PO (batas maksimal untuk performa)
+            const maxShow = 50; // Batasi tampilan untuk performa
+            const poToShow = nomor_po.slice(0, maxShow);
+
+            poToShow.forEach(po => {
+                const item = document.createElement('div');
+                item.className = 'px-3 py-2 hover:bg-gray-100 cursor-pointer border-b transition-colors duration-150';
+
+                const number = document.createElement('div');
+                number.className = 'font-semibold text-sm text-gray-800';
+                number.textContent = po.number_po;
+
+                const date = document.createElement('div');
+                date.className = 'text-sm text-gray-500';
+                date.textContent = po.date_po;
+
+                item.appendChild(number);
+                item.appendChild(date);
+
+                item.onclick = () => {
+                    const noPOInput = document.getElementById('no_po');
+                    noPOInput.value = po.number_po;
+                    dropdownPO.classList.add('hidden');
+
+                    // Update formData jika diperlukan
+                    formData.no_po = po.number_po;
+
+                    console.log('PO selected:', po.number_po);
+                };
+
+                dropdownPO.appendChild(item);
+            });
+
+            // Jika ada lebih banyak data, tampilkan info
+            if (nomor_po.length > maxShow) {
+                const moreInfoItem = document.createElement('div');
+                moreInfoItem.className = 'px-3 py-2 bg-blue-50 border-b text-sm text-blue-600 text-center';
+                moreInfoItem.innerHTML = `<i class="fas fa-info-circle mr-2"></i>Menampilkan ${maxShow} dari ${nomor_po.length} PO. Ketik untuk pencarian spesifik.`;
+                dropdownPO.appendChild(moreInfoItem);
+            }
+        }
+
+        dropdownPO.classList.remove('hidden');
+        console.log('All PO dropdown shown');
+    }
+</script>
+@endsection

@@ -1,0 +1,1276 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\ApprovalStock;
+use App\Models\Branch;
+use App\Models\DetailItemPenjualan;
+use App\Models\KasirPenjualan;
+use Exception;
+use GuzzleHttp\Promise\Utils;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
+
+class SalesController extends Controller
+{
+    public function index(Request $request)
+    {
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        // Validasi kredensial Accurate
+        if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+            return back()->with('error', 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.');
+        }
+
+        // Cache key yang unik per cabang
+        $cacheKey = 'accurate_sales_order_details_' . $activeBranchId;
+        // Tetapkan waktu cache (dalam menit)
+        $cacheDuration = 10; // 10 menit
+
+        // Jika ada parameter force_refresh, bypass cache
+        if ($request->has('force_refresh')) {
+            Cache::forget($cacheKey);
+            Log::info('Cache sales order dihapus karena force_refresh');
+        }
+
+        $errorMessage = null;
+
+        // Periksa apakah cache sudah ada
+        if (Cache::has($cacheKey) && !$request->has('force_refresh')) {
+            $cachedData = Cache::get($cacheKey);
+            $kasirPenjualan = $cachedData['kasirPenjualan'] ?? [];
+            $detailPP = $cachedData['detailPP'] ?? [];
+            $errorMessage = $cachedData['errorMessage'] ?? null;
+            Log::info('Data sales order diambil dari cache');
+            return view('sales_cashier.index', compact('detailPP', 'kasirPenjualan', 'errorMessage'));
+        }
+
+        // Filter kasir penjualan berdasarkan kode_customer dari cabang aktif
+        $kasirPenjualan = KasirPenjualan::where('kode_customer', $branch->customer_id)->get();
+        $detailPP = [];
+        $apiSuccess = false;
+        $hasApiError = false;
+
+        // Jika ada data kasir penjualan, ambil detail dari API
+        if (!empty($kasirPenjualan) && $kasirPenjualan->count() > 0) {
+            // Ambil kredensial Accurate dari branch
+            $apiToken = $branch->accurate_api_token;
+            $signatureSecret = $branch->accurate_signature_secret;
+            $timestamp = Carbon::now()->toIso8601String();
+            $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
+
+            try {
+                // Selalu coba ambil data dari API terlebih dahulu
+                $detailsResult = $this->fetchSalesOrderDetailsInBatches($kasirPenjualan, $apiToken, $signature, $timestamp);
+                $detailPP = $detailsResult['details']; // Data final
+
+                // Cek jika ada error dari proses fetch detail
+                if ($detailsResult['has_error']) {
+                    $hasApiError = true;
+                }
+
+                $apiSuccess = true;
+                Log::info('Data sales order dari API berhasil diambil');
+            } catch (\Exception $e) {
+                // Log error
+                Log::error('Exception saat mengambil data sales order dari API: ' . $e->getMessage());
+                $hasApiError = true;
+            }
+        } else {
+            $apiSuccess = true; // Tidak ada data untuk diproses, anggap sukses
+        }
+
+        // Set error message berdasarkan kondisi
+        if ($hasApiError) {
+            $errorMessage = 'Gagal memuat detail data dari server Accurate. Data yang ditampilkan mungkin tidak lengkap. Silakan coba lagi dengan menekan tombol "Refresh Data".';
+        }
+
+        // Jika API gagal dan tidak ada data, coba gunakan cache sebagai fallback
+        if (!$apiSuccess && empty($detailPP)) {
+            if (Cache::has($cacheKey)) {
+                $cachedData = Cache::get($cacheKey);
+                $kasirPenjualan = $cachedData['kasirPenjualan'] ?? $kasirPenjualan;
+                $detailPP = $cachedData['detailPP'] ?? [];
+                if (is_null($errorMessage)) $errorMessage = $cachedData['errorMessage'] ?? null;
+                Log::info('Data sales order diambil dari cache karena API error');
+            } else {
+                if (is_null($errorMessage)) $errorMessage = 'Gagal terhubung ke server Accurate dan tidak ada data cache tersedia.';
+                Log::warning('Tidak ada cache tersedia, menampilkan data kosong');
+            }
+        }
+
+        // Simpan data ke cache
+        $dataToCache = [
+            'kasirPenjualan' => $kasirPenjualan,
+            'detailPP' => $detailPP,
+            'errorMessage' => $errorMessage
+        ];
+
+        Cache::put($cacheKey, $dataToCache, $cacheDuration * 60);
+        Log::info('Data sales order disimpan ke cache');
+
+        return view('sales_cashier.index', compact('detailPP', 'kasirPenjualan', 'errorMessage'));
+    }
+
+    /**
+     * Mengambil detail sales order dalam batch untuk mengoptimalkan performa
+     */
+    private function fetchSalesOrderDetailsInBatches($kasirPenjualanCollection, $apiToken, $signature, $timestamp, $batchSize = 5)
+    {
+        $detailPP = [];
+        $validItems = $kasirPenjualanCollection->filter(function ($item) {
+            return !empty($item->npj);
+        });
+
+        $batches = $validItems->chunk($batchSize);
+        $hasApiError = false; // Flag error untuk fungsi ini
+
+        foreach ($batches as $batch) {
+            $promises = [];
+            $client = new \GuzzleHttp\Client();
+
+            foreach ($batch as $item) {
+                $detailUrl = 'https://iris.accurate.id/accurate/api/sales-order/detail.do?number=' . $item->npj;
+                $promises[$item->npj] = $client->getAsync($detailUrl, [
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . $apiToken,
+                        'X-Api-Signature' => $signature,
+                        'X-Api-Timestamp' => $timestamp,
+                    ]
+                ]);
+            }
+
+            if (empty($promises)) continue;
+
+            // Jalankan batch promise secara paralel
+            $results = Utils::settle($promises)->wait();
+
+            // Proses hasil dari setiap promise
+            foreach ($results as $npj => $result) {
+                if ($result['state'] === 'fulfilled') {
+                    $detailResponse = json_decode($result['value']->getBody(), true);
+
+                    if (isset($detailResponse['d'])) {
+                        $json = $detailResponse;
+
+                        // pastikan struktur data sesuai
+                        if (isset($json['d']['customer']['contactInfo']['name']) && isset($json['d']['statusName']) && isset($json['d']['totalAmount'])) {
+                            $detailPP[$npj] = [
+                                'customer_name' => $json['d']['customer']['contactInfo']['name'],
+                                'status' => $json['d']['statusName'],
+                                'total_amount' => $json['d']['totalAmount'],
+                                'description' => $json['d']['description'] ?? null
+                            ];
+                        } else {
+                            // fallback jika struktur data tidak lengkap
+                            $detailPP[$npj] = [
+                                'customer_name' => null,
+                                'status' => null,
+                                'total_amount' => null,
+                                'description' => null
+                            ];
+                        }
+                    } else {
+                        $detailPP[$npj] = [
+                            'customer_name' => null,
+                            'status' => null,
+                            'total_amount' => null,
+                            'description' => null
+                        ];
+                    }
+
+                    Log::info("Sales order detail fetched for NPJ: {$npj}");
+                } else {
+                    $reason = $result['reason'];
+                    Log::error("Failed to fetch sales order detail for NPJ {$npj}: " . $reason->getMessage());
+
+                    // Check if it's a rate limiting error
+                    if ($reason instanceof \GuzzleHttp\Exception\ClientException && $reason->getResponse()->getStatusCode() == 429) {
+                        $hasApiError = true;
+                    }
+
+                    $detailPP[$npj] = [
+                        'customer_name' => null,
+                        'status' => null,
+                        'total_amount' => null,
+                        'description' => null
+                    ];
+                }
+            }
+
+            // Tambahkan delay kecil antara batch untuk menghindari rate limiting
+            usleep(200000); // 200ms
+        }
+
+        return [
+            'details' => $detailPP,
+            'has_error' => $hasApiError
+        ];
+    }
+
+    public function show($npj, Request $request)
+    {
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        // Validasi kredensial Accurate
+        if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+            return back()->with('error', 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.');
+        }
+
+        // Cache key yang unik untuk detail sales order per cabang
+        $cacheKey = 'sales_order_detail_' . $activeBranchId . '_' . $npj;
+        $cacheDuration = 10; // 10 menit
+
+        // Jika ada parameter force_refresh, bypass cache
+        if ($request->has('force_refresh')) {
+            Cache::forget($cacheKey);
+        }
+
+        $errorMessage = null;
+        $kasirPenjualan = null;
+        $accurateDetail = null;
+        $accurateDetailItems = [];
+
+        try {
+            // Ambil data kasir penjualan dengan relasi detail items berdasarkan kode_customer
+            $kasirPenjualan = KasirPenjualan::with('detailItems')
+                ->where('npj', $npj)
+                ->where('kode_customer', $branch->customer_id)
+                ->firstOrFail();
+
+            // Fetch detail dari API Accurate jika NPJ tersedia
+            if ($kasirPenjualan->npj) {
+                // Ambil kredensial Accurate dari branch
+                $apiToken = $branch->accurate_api_token;
+                $signatureSecret = $branch->accurate_signature_secret;
+                $timestamp = Carbon::now()->toIso8601String();
+                $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
+
+                $response = Http::withHeaders([
+                    'Authorization' => 'Bearer ' . $apiToken,
+                    'X-Api-Signature' => $signature,
+                    'X-Api-Timestamp' => $timestamp,
+                ])->get('https://iris.accurate.id/accurate/api/sales-order/detail.do', [
+                    'number' => $kasirPenjualan->npj,
+                ]);
+
+                if ($response->successful()) {
+                    $json = $response->json();
+
+                    // Ambil semua data 'd' tanpa filter
+                    if (isset($json['d'])) {
+                        $accurateDetail = $json['d'];
+
+                        // Ekstrak detail items dari API
+                        if (isset($json['d']['detailItem']) && is_array($json['d']['detailItem'])) {
+                            $accurateDetailItems = $json['d']['detailItem'];
+                        }
+
+                        $dataToCache = [
+                            'kasirPenjualan' => $kasirPenjualan,
+                            'accurateDetail' => $accurateDetail,
+                            'accurateDetailItems' => $accurateDetailItems,
+                            'errorMessage' => null
+                        ];
+
+                        // Cache the successful result
+                        Cache::put($cacheKey, $dataToCache, $cacheDuration * 60);
+                        Log::info("Data Accurate untuk sales order {$npj} berhasil diambil dari API dan disimpan ke cache");
+                    } else {
+                        $errorMessage = "Data detail untuk NPJ {$npj} tidak ditemukan.";
+                    }
+                } else {
+                    Log::error('API detail request failed', [
+                        'status' => $response->status(),
+                        'body' => $response->body(),
+                    ]);
+
+                    if ($response->status() == 404) {
+                        $errorMessage = "Sales order dengan NPJ {$npj} tidak ditemukan.";
+                    } else {
+                        $errorMessage = "Gagal mengambil data dari server. Silakan coba lagi.";
+                    }
+                }
+            }
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            $errorMessage = "Data kasir penjualan dengan NPJ {$npj} tidak ditemukan.";
+            Log::error('Kasir penjualan tidak ditemukan: ' . $e->getMessage(), ['npj' => $npj]);
+        } catch (\Exception $e) {
+            // Log error jika gagal fetch dari API
+            Log::error('Exception saat mengambil detail sales order: ' . $e->getMessage(), [
+                'npj' => $npj,
+                'kasir_penjualan' => $kasirPenjualan ? $kasirPenjualan->toArray() : null
+            ]);
+
+            if ($kasirPenjualan) {
+                $errorMessage = "Gagal mengambil detail dari server Accurate. Silakan coba lagi.";
+            } else {
+                $errorMessage = "Terjadi kesalahan koneksi. Silakan periksa jaringan Anda.";
+            }
+
+            // Try to use cached data if available sebagai fallback
+            if (Cache::has($cacheKey)) {
+                $cachedData = Cache::get($cacheKey);
+                $kasirPenjualan = $cachedData['kasirPenjualan'] ?? $kasirPenjualan;
+                $accurateDetail = $cachedData['accurateDetail'] ?? null;
+                $accurateDetailItems = $cachedData['accurateDetailItems'] ?? [];
+                if (is_null($errorMessage)) $errorMessage = $cachedData['errorMessage'] ?? null;
+                Log::info("Menampilkan detail sales order {$npj} dari cache karena API gagal.");
+            }
+        }
+
+        // Helper function untuk menghitung total harga dengan diskon
+        $calculateTotalWithDiscount = function ($harga, $qty, $diskon) {
+            $subtotal = $harga * $qty;
+
+            if ($diskon && $diskon > 0) {
+                // Jika diskon antara 0-100, anggap sebagai persentase
+                if ($diskon <= 100) {
+                    $diskonAmount = $subtotal * ($diskon / 100);
+                    return $subtotal - $diskonAmount;
+                }
+                // Jika diskon di atas 100, anggap sebagai nominal
+                else {
+                    return max(0, $subtotal - $diskon); // Pastikan tidak negatif
+                }
+            }
+
+            return $subtotal;
+        };
+
+        // Merge data berdasarkan nama yang sama dari ApprovalStock
+        $mergedItems = [];
+        $detailBarcodeMappings = []; // Untuk show detail per barcode
+
+        foreach ($kasirPenjualan->detailItems as $detailItem) {
+            // Cari data ApprovalStock berdasarkan barcode dan kode_customer
+            $approvalStock = ApprovalStock::where('barcode', $detailItem->barcode)
+                ->where('kode_customer', $branch->customer_id)
+                ->first();
+
+            // Hitung total harga sebelum dan sesudah diskon
+            $subtotalSebelumDiskon = $detailItem->harga * $detailItem->qty;
+            $totalHargaSetelahDiskon = $calculateTotalWithDiscount(
+                $detailItem->harga,
+                $detailItem->qty,
+                $detailItem->diskon
+            );
+            $nominalDiskon = $subtotalSebelumDiskon - $totalHargaSetelahDiskon;
+
+            if ($approvalStock) {
+                $itemName = $approvalStock->nama;
+
+                // Simpan mapping untuk detail barcode
+                $detailBarcodeMappings[] = [
+                    'barcode' => $detailItem->barcode,
+                    'nama' => $itemName,
+                    'qty' => $detailItem->qty,
+                    'harga' => $detailItem->harga,
+                    'diskon' => $detailItem->diskon,
+                    'subtotal_sebelum_diskon' => $subtotalSebelumDiskon,
+                    'nominal_diskon' => $nominalDiskon,
+                    'total_harga' => $totalHargaSetelahDiskon,
+                    'approval_stock' => $approvalStock
+                ];
+
+                // Merge berdasarkan nama yang sama
+                if (isset($mergedItems[$itemName])) {
+                    // Jika nama sudah ada, merge kuantitas dan total harga
+                    $mergedItems[$itemName]['total_qty'] += $detailItem->qty;
+                    $mergedItems[$itemName]['subtotal_sebelum_diskon'] += $subtotalSebelumDiskon;
+                    $mergedItems[$itemName]['total_nominal_diskon'] += $nominalDiskon;
+                    $mergedItems[$itemName]['total_harga'] += $totalHargaSetelahDiskon;
+                    $mergedItems[$itemName]['barcodes'][] = $detailItem->barcode;
+                } else {
+                    // Jika nama belum ada, buat entry baru
+                    $mergedItems[$itemName] = [
+                        'nama' => $itemName,
+                        'total_qty' => $detailItem->qty,
+                        'harga_satuan' => $detailItem->harga,
+                        'diskon' => $detailItem->diskon, // Ambil diskon dari yang pertama
+                        'subtotal_sebelum_diskon' => $subtotalSebelumDiskon,
+                        'total_nominal_diskon' => $nominalDiskon,
+                        'total_harga' => $totalHargaSetelahDiskon,
+                        'barcodes' => [$detailItem->barcode],
+                        'approval_stock' => $approvalStock
+                    ];
+                }
+            } else {
+                // Jika ApprovalStock tidak ditemukan, tetap tampilkan data dari DetailItemPenjualan
+                $itemName = 'Item dengan barcode: ' . $detailItem->barcode;
+
+                $detailBarcodeMappings[] = [
+                    'barcode' => $detailItem->barcode,
+                    'nama' => $itemName,
+                    'qty' => $detailItem->qty,
+                    'harga' => $detailItem->harga,
+                    'diskon' => $detailItem->diskon,
+                    'subtotal_sebelum_diskon' => $subtotalSebelumDiskon,
+                    'nominal_diskon' => $nominalDiskon,
+                    'total_harga' => $totalHargaSetelahDiskon,
+                    'approval_stock' => null
+                ];
+
+                if (isset($mergedItems[$itemName])) {
+                    $mergedItems[$itemName]['total_qty'] += $detailItem->qty;
+                    $mergedItems[$itemName]['subtotal_sebelum_diskon'] += $subtotalSebelumDiskon;
+                    $mergedItems[$itemName]['total_nominal_diskon'] += $nominalDiskon;
+                    $mergedItems[$itemName]['total_harga'] += $totalHargaSetelahDiskon;
+                    $mergedItems[$itemName]['barcodes'][] = $detailItem->barcode;
+                } else {
+                    $mergedItems[$itemName] = [
+                        'nama' => $itemName,
+                        'total_qty' => $detailItem->qty,
+                        'harga_satuan' => $detailItem->harga,
+                        'diskon' => $detailItem->diskon,
+                        'subtotal_sebelum_diskon' => $subtotalSebelumDiskon,
+                        'total_nominal_diskon' => $nominalDiskon,
+                        'total_harga' => $totalHargaSetelahDiskon,
+                        'barcodes' => [$detailItem->barcode],
+                        'approval_stock' => null
+                    ];
+                }
+            }
+        }
+
+        // Hitung persentase diskon efektif untuk merged items
+        foreach ($mergedItems as $key => &$item) {
+            if ($item['subtotal_sebelum_diskon'] > 0) {
+                $item['persentase_diskon_efektif'] = ($item['total_nominal_diskon'] / $item['subtotal_sebelum_diskon']) * 100;
+            } else {
+                $item['persentase_diskon_efektif'] = 0;
+            }
+        }
+
+        return view('sales_cashier.detail', compact(
+            'kasirPenjualan',
+            'accurateDetail',
+            'accurateDetailItems',
+            'mergedItems',
+            'detailBarcodeMappings',
+            'errorMessage'
+        ));
+    }
+
+    public function create(Request $request)
+    {
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        // Validasi kredensial Accurate
+        if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+            return back()->with('error', 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.');
+        }
+
+        // Ambil kredensial Accurate dari branch
+        $apiToken = $branch->accurate_api_token;
+        $signatureSecret = $branch->accurate_signature_secret;
+        $timestamp = Carbon::now()->toIso8601String();
+        $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
+
+        // Initialize variables
+        $pelanggan = [];
+        $paymentTerms = [];
+        $accurateErrors = [];
+
+        try {
+            // Fetch data secara parallel untuk mendapatkan data real-time
+            $customerData = $this->fetchCustomersFromAccurate($apiToken, $signature, $timestamp);
+            $pelanggan = $customerData['customers'];
+            $accurateErrors = array_merge($accurateErrors, $customerData['errors']);
+
+            $paymentTermData = $this->fetchPaymentTermsFromAccurate($apiToken, $signature, $timestamp);
+            $paymentTerms = $paymentTermData['paymentTerms'];
+            $accurateErrors = array_merge($accurateErrors, $paymentTermData['errors']);
+
+            Log::info('Data customer dan payment terms untuk create berhasil diambil dari API (real-time)');
+        } catch (\Exception $e) {
+            Log::error('Exception occurred while fetching create data from Accurate', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            $accurateErrors[] = 'An error occurred while fetching data from Accurate: ' . $e->getMessage();
+        }
+
+        // Generate NPJ
+        $npj = KasirPenjualan::generateNpj();
+
+        return view('sales_cashier.create', compact('pelanggan', 'npj', 'paymentTerms', 'accurateErrors'));
+    }
+
+    /**
+     * Fetch customers data from Accurate API with pagination and parallel processing
+     */
+    private function fetchCustomersFromAccurate($apiToken, $signature, $timestamp)
+    {
+        $customers = [];
+        $errors = [];
+
+        try {
+            $customerApiUrl = 'https://iris.accurate.id/accurate/api/customer/list.do';
+            $data = [
+                'sp.page' => 1,
+                'sp.pageSize' => 20
+            ];
+
+            $firstPageResponse = Http::timeout(30)->withHeaders([
+                'Authorization' => 'Bearer ' . $apiToken,
+                'X-Api-Signature' => $signature,
+                'X-Api-Timestamp' => $timestamp,
+            ])->get($customerApiUrl, $data);
+
+            if ($firstPageResponse->successful()) {
+                $responseData = $firstPageResponse->json();
+                $allCustomers = [];
+
+                if (isset($responseData['d']) && is_array($responseData['d'])) {
+                    $allCustomers = $responseData['d'];
+
+                    // Hitung total halaman berdasarkan sp.rowCount jika tersedia
+                    $totalItems = $responseData['sp']['rowCount'] ?? 0;
+                    $totalPages = ceil($totalItems / 20);
+
+                    // Jika lebih dari 1 halaman, ambil halaman lainnya secara paralel
+                    if ($totalPages > 1) {
+                        $promises = [];
+                        $client = new \GuzzleHttp\Client();
+
+                        for ($page = 2; $page <= $totalPages; $page++) {
+                            $promises[$page] = $client->getAsync($customerApiUrl, [
+                                'headers' => [
+                                    'Authorization' => 'Bearer ' . $apiToken,
+                                    'X-Api-Signature' => $signature,
+                                    'X-Api-Timestamp' => $timestamp,
+                                ],
+                                'query' => [
+                                    'sp.page' => $page,
+                                    'sp.pageSize' => 20
+                                ]
+                            ]);
+                        }
+
+                        $results = Utils::settle($promises)->wait();
+
+                        foreach ($results as $page => $result) {
+                            if ($result['state'] === 'fulfilled') {
+                                $pageResponse = json_decode($result['value']->getBody(), true);
+                                if (isset($pageResponse['d']) && is_array($pageResponse['d'])) {
+                                    $allCustomers = array_merge($allCustomers, $pageResponse['d']);
+                                }
+                            } else {
+                                $errors[] = "Failed to fetch customers page {$page}: " . $result['reason'];
+                            }
+                        }
+                    }
+
+                    // Fetch customer details dalam batch
+                    $customers = $this->fetchCustomerDetailsInBatches($allCustomers, $apiToken, $signature, $timestamp);
+                } else {
+                    $errors[] = 'Unexpected customer list response structure from Accurate.';
+                }
+            } else {
+                $errors[] = 'Failed to fetch customer list from Accurate: ' . $firstPageResponse->body();
+            }
+        } catch (\Exception $e) {
+            $errors[] = 'Exception occurred while fetching customers: ' . $e->getMessage();
+        }
+
+        return [
+            'customers' => $customers,
+            'errors' => $errors
+        ];
+    }
+
+    /**
+     * Fetch customer details dalam batch
+     */
+    private function fetchCustomerDetailsInBatches($customerList, $apiToken, $signature, $timestamp, $batchSize = 5)
+    {
+        $customerDetails = [];
+        $batches = array_chunk($customerList, $batchSize);
+
+        foreach ($batches as $batch) {
+            $promises = [];
+            $client = new \GuzzleHttp\Client();
+
+            foreach ($batch as $customer) {
+                $detailUrl = 'https://iris.accurate.id/accurate/api/customer/detail.do?id=' . $customer['id'];
+                $promises[$customer['id']] = $client->getAsync($detailUrl, [
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . $apiToken,
+                        'X-Api-Signature' => $signature,
+                        'X-Api-Timestamp' => $timestamp,
+                    ]
+                ]);
+            }
+
+            $results = Utils::settle($promises)->wait();
+
+            foreach ($results as $customerId => $result) {
+                if ($result['state'] === 'fulfilled') {
+                    $detailResponse = json_decode($result['value']->getBody(), true);
+                    if (isset($detailResponse['d'])) {
+                        $customerDetails[] = $detailResponse['d'];
+                    }
+                } else {
+                    Log::error("Failed to fetch customer detail for ID {$customerId}: " . $result['reason']);
+                }
+            }
+
+            usleep(200000); // 200ms
+        }
+
+        return $customerDetails;
+    }
+
+    /**
+     * Fetch payment terms data from Accurate API
+     */
+    private function fetchPaymentTermsFromAccurate($apiToken, $signature, $timestamp)
+    {
+        $paymentTerms = [];
+        $errors = [];
+
+        try {
+            $paymentTermResponse = Http::timeout(30)->withHeaders([
+                'Authorization' => 'Bearer ' . $apiToken,
+                'X-Api-Signature' => $signature,
+                'X-Api-Timestamp' => $timestamp,
+            ])->get('https://iris.accurate.id/accurate/api/payment-term/list.do');
+
+            if ($paymentTermResponse->successful()) {
+                $responseData = $paymentTermResponse->json();
+                if (isset($responseData['d']) && is_array($responseData['d'])) {
+                    $paymentTerms = $responseData['d'];
+                } else {
+                    $errors[] = 'Unexpected payment term list response structure from Accurate.';
+                }
+            } else {
+                $errors[] = 'Failed to fetch payment terms from Accurate: ' . $paymentTermResponse->body();
+            }
+        } catch (\Exception $e) {
+            $errors[] = 'Exception occurred while fetching payment terms: ' . $e->getMessage();
+        }
+
+        return [
+            'paymentTerms' => $paymentTerms,
+            'errors' => $errors
+        ];
+    }
+
+    public function getCustomerInfo(Request $req)
+    {
+        try {
+            // Validasi input customer
+            $req->validate([
+                'customer_no' => 'required|string|max:255'
+            ]);
+
+            $customerNo = $req->input('customer_no');
+
+            // Validasi cabang aktif
+            $activeBranchId = session('active_branch');
+            if (!$activeBranchId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cabang belum dipilih.'
+                ], 400);
+            }
+
+            $branch = Branch::find($activeBranchId);
+            if (!$branch) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cabang tidak valid.'
+                ], 400);
+            }
+
+            // Validasi kredensial Accurate
+            if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.'
+                ], 400);
+            }
+
+            // Ambil kredensial Accurate dari branch
+            $apiToken = $branch->accurate_api_token;
+            $signatureSecret = $branch->accurate_signature_secret;
+            $timestamp = Carbon::now()->toIso8601String();
+            $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
+
+            try {
+                Log::info("getCustomerInfo: Mengambil detail customer dengan customerNo: {$customerNo}");
+
+                // Request ke Accurate API untuk mendapatkan detail customer
+                $response = Http::timeout(30)->withHeaders([
+                    'Authorization' => 'Bearer ' . $apiToken,
+                    'X-Api-Signature' => $signature,
+                    'X-Api-Timestamp' => $timestamp,
+                ])->post('https://iris.accurate.id/accurate/api/customer/detail.do', [
+                    'customerNo' => $customerNo
+                ]);
+
+                // Cek apakah response berhasil
+                if (!$response->successful()) {
+                    Log::error("getCustomerInfo: Gagal mengambil detail customer. Status: {$response->status()}, Body: {$response->body()}");
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Gagal mendapatkan detail customer dari Accurate',
+                        'error' => $response->status() . ': ' . $response->body()
+                    ], 400);
+                }
+
+                $customerData = $response->json();
+
+                // Cek struktur response dari API
+                if (!isset($customerData['d'])) {
+                    Log::warning("getCustomerInfo: Struktur response tidak sesuai untuk customerNo: {$customerNo}");
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Data customer tidak ditemukan atau struktur response tidak valid',
+                        'raw_response' => $customerData
+                    ], 404);
+                }
+
+                // Ambil data customer dari response
+                $customer = $customerData['d'];
+
+                // Format data customer yang akan dikembalikan
+                $formattedCustomerData = [
+                    'customer_pay_term' => $customer['term']['name'] ?? null,
+                    'customer_address' => $customer['shipStreet'] ?? null,
+                ];
+
+                Log::info("getCustomerInfo: Berhasil mendapatkan detail customer untuk customerNo: {$customerNo}, Nama: " . ($customer['name'] ?? 'Unknown'));
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Detail customer berhasil diambil',
+                    'data' => $formattedCustomerData,
+                    'raw_data' => $customer // Opsional: untuk debugging
+                ], 200);
+            } catch (Exception $e) {
+                Log::error("getCustomerInfo: Error saat mengambil data customer: " . $e->getMessage());
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Terjadi kesalahan saat mengambil data customer: ' . $e->getMessage(),
+                    'error' => $e->getMessage()
+                ], 500);
+            }
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (Exception $e) {
+            Log::error("getCustomerInfo: Error umum: " . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan pada server',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getBarcodeAjax(Request $req)
+    {
+        try {
+            // Validasi input barcode
+            $req->validate([
+                'barcode' => 'required|string|max:10'
+            ]);
+
+            $barcode = $req->input('barcode');
+
+            // Validasi cabang aktif
+            $activeBranchId = session('active_branch');
+            if (!$activeBranchId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cabang belum dipilih.'
+                ], 400);
+            }
+
+            $branch = Branch::find($activeBranchId);
+            if (!$branch) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cabang tidak valid.'
+                ], 400);
+            }
+
+            // Validasi kredensial Accurate
+            if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.'
+                ], 400);
+            }
+
+            // Cari data berdasarkan barcode di model ApprovalStock berdasarkan kode_customer
+            $approvalStock = ApprovalStock::where('barcode', $barcode)
+                ->where('kode_customer', $branch->customer_id)
+                ->where('status', 'uploaded')
+                ->first();
+
+            if (!$approvalStock) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Barcode tidak ditemukan',
+                    'data' => null
+                ], 404);
+            }
+
+            // Pengecekan kuantitas - jika 0 atau null, tolak request
+            if (!$approvalStock->panjang || $approvalStock->panjang <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Stok untuk barcode ini sudah habis atau tidak tersedia',
+                    'data' => null,
+                    'stock_info' => [
+                        'current_quantity' => $approvalStock->panjang ?? 0,
+                        'item_name' => $approvalStock->nama
+                    ]
+                ], 400);
+            }
+
+            // Ambil data dari API Accurate dengan pagination menggunakan kredensial dari branch
+            $apiToken = $branch->accurate_api_token;
+            $signatureSecret = $branch->accurate_signature_secret;
+            $timestamp = Carbon::now()->toIso8601String();
+            $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
+
+            try {
+                $allAccurateItems = [];
+                $totalPages = 2;
+                $pageSize = 100;
+
+                // Loop untuk mengambil semua data dari 7 halaman
+                for ($page = 1; $page <= $totalPages; $page++) {
+                    Log::info("getBarcodeAjax: Mengambil data dari Accurate API halaman {$page}");
+
+                    $response = Http::timeout(30)->withHeaders([
+                        'Authorization' => 'Bearer ' . $apiToken,
+                        'X-Api-Signature' => $signature,
+                        'X-Api-Timestamp' => $timestamp,
+                    ])->get('https://iris.accurate.id/accurate/api/item/list.do', [
+                        'fields' => 'name,no,unit1,unitPrice',
+                        'sp.pageSize' => $pageSize,
+                        'sp.page' => $page,
+                    ]);
+
+                    if (!$response->successful()) {
+                        Log::error("getBarcodeAjax: Gagal mengambil data dari Accurate API halaman {$page}. Status: {$response->status()}, Body: {$response->body()}");
+
+                        // Jika gagal di halaman pertama, kembalikan error
+                        if ($page === 1) {
+                            return response()->json([
+                                'success' => true,
+                                'message' => 'Barcode ditemukan, tetapi gagal mendapatkan data dari Accurate',
+                                'data' => $approvalStock,
+                                'accurate_error' => $response->status() . ': ' . $response->body()
+                            ], 200);
+                        }
+
+                        // Jika gagal di halaman selanjutnya, lanjutkan dengan data yang sudah didapat
+                        Log::warning("getBarcodeAjax: Melanjutkan proses dengan data yang sudah didapat dari halaman 1-" . ($page - 1));
+                        break;
+                    }
+
+                    $responseData = $response->json();
+
+                    if (!isset($responseData['d']) || !is_array($responseData['d'])) {
+                        Log::warning("getBarcodeAjax: Struktur data tidak sesuai pada halaman {$page}");
+                        continue;
+                    }
+
+                    // Tambahkan data dari halaman ini ke array keseluruhan
+                    $allAccurateItems = array_merge($allAccurateItems, $responseData['d']);
+
+                    Log::info("getBarcodeAjax: Berhasil mengambil " . count($responseData['d']) . " item dari halaman {$page}. Total items sejauh ini: " . count($allAccurateItems));
+
+                    // Jika data kosong, kemungkinan sudah mencapai halaman terakhir
+                    if (empty($responseData['d'])) {
+                        Log::info("getBarcodeAjax: Tidak ada data lagi pada halaman {$page}, menghentikan pagination");
+                        break;
+                    }
+
+                    // Delay kecil untuk menghindari rate limiting
+                    usleep(100000); // 0.1 detik
+                }
+
+                Log::info("getBarcodeAjax: Total items yang berhasil diambil dari Accurate API: " . count($allAccurateItems));
+
+                if (empty($allAccurateItems)) {
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Barcode ditemukan, tetapi tidak ada data dari Accurate',
+                        'data' => $approvalStock
+                    ], 200);
+                }
+
+                // Lakukan matching nama antara ApprovalStock dan semua data dari Accurate
+                $matchedItem = null;
+                $approvalNama = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', str_replace('KC', '', $approvalStock->nama)));
+
+                foreach ($allAccurateItems as $item) {
+                    $itemName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $item['name'] ?? ''));
+
+                    if ($itemName === $approvalNama) {
+                        $matchedItem = $item;
+                        break;
+                    }
+                }
+
+                // --- LOGGING UNTUK MATCHED ITEM ---
+                if ($matchedItem) {
+                    Log::info("getBarcodeAjax: Barcode {$barcode} berhasil dicocokkan. Approval Stock Nama: '{$approvalStock->nama}', Accurate Item Name: '{$matchedItem['name']}', Accurate Item No: '{$matchedItem['no']}'. Total items yang dibandingkan: " . count($allAccurateItems));
+                } else {
+                    Log::info("getBarcodeAjax: Barcode {$barcode} ditemukan di ApprovalStock ('{$approvalStock->nama}'), tetapi tidak ada item yang cocok di Accurate API dari " . count($allAccurateItems) . " items.");
+
+                    // Log beberapa contoh nama item dari Accurate untuk debugging
+                    $sampleItems = array_slice($allAccurateItems, 0, 5);
+                    foreach ($sampleItems as $index => $item) {
+                        Log::info("getBarcodeAjax: Sample item " . ($index + 1) . " dari Accurate: '{$item['name']}'");
+                    }
+                }
+                // --- AKHIR LOGGING UNTUK MATCHED ITEM ---
+
+                // Gabungkan data ApprovalStock dengan data dari Accurate
+                $mergedData = $approvalStock->toArray();
+
+                if ($matchedItem) {
+                    $mergedData['accurate_data'] = [
+                        'kode_barang' => $matchedItem['no'] ?? null,
+                        'satuan_barang' => $matchedItem['unit1']['name'] ?? null,
+                        'harga_barang' => $matchedItem['unitPrice'] ?? null,
+                    ];
+                } else {
+                    $mergedData['accurate_data'] = null;
+                }
+
+                // Tambahkan informasi tentang total data yang dibandingkan
+                $mergedData['total_accurate_items_compared'] = count($allAccurateItems);
+
+                $responseMessage = $matchedItem ?
+                    'Barcode ditemukan dan berhasil dicocokkan dengan data Accurate (' . count($allAccurateItems) . ' items dibandingkan)' :
+                    'Barcode ditemukan tetapi tidak cocok dengan data Accurate (' . count($allAccurateItems) . ' items dibandingkan)';
+
+                return response()->json([
+                    'success' => true,
+                    'message' => $responseMessage,
+                    'data' => $mergedData
+                ], 200);
+            } catch (Exception $e) {
+                // Jika terjadi error saat mengambil data dari Accurate, tetap kembalikan data ApprovalStock
+                Log::error("getBarcodeAjax: Error saat mengambil data dari Accurate: " . $e->getMessage());
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Barcode ditemukan, tetapi gagal mendapatkan data dari Accurate: ' . $e->getMessage(),
+                    'data' => $approvalStock
+                ], 500);
+            }
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (Exception $e) {
+            Log::error("getBarcodeAjax: Error umum: " . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan pada server',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function store(Request $request)
+    {
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        // Validasi kredensial Accurate
+        if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+            return back()->with('error', 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.');
+        }
+
+        // SOLUSI 1: Preprocessing data sebelum validasi (REKOMENDASI)
+        $requestData = $request->all();
+
+        // Convert checkbox values to boolean - handle string "true"/"false" dan boolean values
+        $requestData['kena_pajak'] = isset($requestData['kena_pajak']) ?
+            (filter_var($requestData['kena_pajak'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false) : false;
+        $requestData['total_termasuk_pajak'] = isset($requestData['total_termasuk_pajak']) ?
+            (filter_var($requestData['total_termasuk_pajak'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false) : false;
+
+        $validator = Validator::make($requestData, [
+            'npj'                   => 'required|string|max:255|unique:kasir_penjualans,npj',
+            'tanggal'               => 'required|date',
+            'customer'              => 'required|string|max:255',
+            'pay_term'              => 'nullable|string',
+            'alamat'                => 'nullable|string',
+            'keterangan'            => 'nullable|string',
+            'kena_pajak'            => 'nullable|boolean',
+            'total_termasuk_pajak'  => 'nullable|boolean',
+            'diskon_keseluruhan'    => 'nullable|numeric|min:0',
+            'detailItems'           => 'required|array|min:1',
+            'detailItems.*.barcode' => 'required|string|max:10',
+            'detailItems.*.kode'      => 'required|string',
+            'detailItems.*.kuantitas' => 'required|string',
+            'detailItems.*.harga'     => 'required|numeric|min:0',
+            'detailItems.*.diskon'    => 'nullable|numeric|min:0',
+        ], [
+            // NPJ validation messages
+            'npj.required' => 'Nomor Penjualan (NPJ) wajib diisi.',
+            'npj.unique' => 'Nomor Penjualan (NPJ) sudah digunakan.',
+
+            // Tanggal validation messages
+            'tanggal.required' => 'Tanggal wajib diisi.',
+            'tanggal.date' => 'Format tanggal tidak valid.',
+
+            // Customer validation messages
+            'customer.required' => 'Nama customer wajib diisi.',
+
+            // Diskon keseluruhan validation messages
+            'diskon_keseluruhan.numeric' => 'Diskon keseluruhan harus berupa angka.',
+            'diskon_keseluruhan.min' => 'Diskon keseluruhan tidak boleh kurang dari 0.',
+
+            // Detail items validation messages
+            'detailItems.required' => 'Detail item wajib diisi.',
+            'detailItems.min' => 'Minimal harus ada 1 item yang Di Inputkan.',
+
+            // Detail items barcode validation messages
+            'detailItems.*.barcode.required' => 'Barcode item wajib diisi.',
+            'detailItems.*.barcode.max' => 'Barcode item maksimal 10 karakter.',
+
+            // Detail items kode validation messages
+            'detailItems.*.kode.required' => 'Kode item wajib diisi.',
+
+            // Detail items kuantitas validation messages
+            'detailItems.*.kuantitas.required' => 'Kuantitas item wajib diisi.',
+
+            // Detail items harga validation messages
+            'detailItems.*.harga.required' => 'Harga item wajib diisi.',
+            'detailItems.*.harga.min' => 'Harga item tidak boleh kurang dari 0.',
+
+            // Detail items diskon validation messages
+            'detailItems.*.diskon.numeric' => 'Diskon item harus berupa angka.',
+            'detailItems.*.diskon.min' => 'Diskon item tidak boleh kurang dari 0.',
+        ]);
+
+        if ($validator->fails()) {
+            return back()->withErrors($validator)->withInput()->with('error', 'Data yang dikirim tidak valid.');
+        }
+
+        try {
+            $validatedData = $validator->validated();
+
+            Log::info('Isi validatedData kena_pajak:', ['kena_pajak' => $validatedData['kena_pajak'] ?? null]);
+            Log::info('Isi validatedData total_termasuk_pajak:', ['total_termasuk_pajak' => $validatedData['total_termasuk_pajak'] ?? null]);
+
+            // 2. Siapkan payload untuk Accurate API
+            $detailItemsForAccurate = [];
+            foreach ($validatedData['detailItems'] as $item) {
+                $accurateItem = [
+                    "itemNo"    => $item['kode'],
+                    "quantity"  => $item['kuantitas'],
+                    "unitPrice" => $item['harga'],
+                ];
+
+                // --- LOGIKA UTAMA: Kondisi Diskon ---
+                // Cek apakah ada diskon dan nilainya lebih dari 0
+                if (isset($item['diskon']) && $item['diskon'] > 0) {
+                    $diskon = (float) $item['diskon'];
+
+                    // Jika diskon antara 0-100, anggap sebagai PERSENTASE
+                    if ($diskon > 0 && $diskon <= 100) {
+                        $accurateItem['itemDiscPercent'] = $diskon;
+                    }
+                    // Jika diskon di atas 100, anggap sebagai NOMINAL
+                    else {
+                        $accurateItem['itemCashDiscount'] = $diskon;
+                    }
+                }
+
+                $detailItemsForAccurate[] = $accurateItem;
+            }
+
+            // Siapkan data untuk API Accurate dengan mengecek nilai null
+            $postDataForAccurate = [
+                "customerNo"        => $validatedData['customer'],
+                "transDate"         => date('d/m/Y', strtotime($validatedData['tanggal'])),
+                "number"            => $validatedData['npj'],
+                "detailItem"        => $detailItemsForAccurate,
+            ];
+
+            // Set syarat bayar: gunakan yang diinput atau default C.O.D jika kosong
+            $syaratBayar = !empty($validatedData['pay_term']) ? $validatedData['pay_term'] : 'C.O.D';
+            $postDataForAccurate['paymentTermName'] = $syaratBayar;
+
+            if (!empty($validatedData['alamat'])) {
+                $postDataForAccurate['toAddress'] = $validatedData['alamat'];
+            }
+
+            if (!empty($validatedData['keterangan'])) {
+                $postDataForAccurate['description'] = $validatedData['keterangan'];
+            }
+
+            if (!empty($validatedData['diskon_keseluruhan'])) {
+                if (isset($validatedData['diskon_keseluruhan']) && $validatedData['diskon_keseluruhan'] > 0) {
+                    $diskonKeseluruhan = (float) $validatedData['diskon_keseluruhan'];
+
+                    // Jika diskon antara 0-100, anggap sebagai PERSENTASE
+                    if ($diskonKeseluruhan > 0 && $diskonKeseluruhan <= 100) {
+                        $postDataForAccurate['cashDiscPercent'] = $diskonKeseluruhan;
+                    }
+                    // Jika diskon di atas 100, anggap sebagai NOMINAL
+                    else {
+                        $postDataForAccurate['cashDiscount'] = $diskonKeseluruhan;
+                    }
+                }
+            }
+
+            if (isset($validatedData['kena_pajak'])) {
+                $postDataForAccurate['taxable'] = $validatedData['kena_pajak'];
+            }
+
+            if (isset($validatedData['total_termasuk_pajak'])) {
+                $postDataForAccurate['inclusiveTax'] = $validatedData['total_termasuk_pajak'];
+            }
+
+            // 3. Kirim data ke API Accurate menggunakan kredensial dari branch
+            $apiToken = $branch->accurate_api_token;
+            $signatureSecret = $branch->accurate_signature_secret;
+            $timestamp = Carbon::now()->toIso8601String();
+            $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
+
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $apiToken,
+                'X-Api-Signature' => $signature,
+                'X-Api-Timestamp' => $timestamp,
+                'Content-Type'  => 'application/json',
+            ])->post('https://iris.accurate.id/accurate/api/sales-order/save.do', $postDataForAccurate);
+
+            // 4. Validasi response dari API Accurate
+            if (!$response->successful()) {
+                // Jika HTTP status tidak 2xx
+                return back()->withInput()->with('error', 'Gagal mengirim data ke Accurate API. HTTP Status: ' . $response->status());
+            }
+
+            // Decode response body
+            $responseData = $response->json();
+
+            // Cek apakah response mengandung error dari Accurate
+            if (isset($responseData['s']) && $responseData['s'] === false) {
+                // Jika API Accurate mengembalikan status error
+                return back()->withInput()->with('error', 'Accurate API mengembalikan error: ' . ($responseData['m'] ?? 'Unknown error'));
+            }
+
+            // 5. Jika API Accurate berhasil, simpan ke database lokal dengan kode_customer
+            $kasirPenjualan = KasirPenjualan::create([
+                'npj' => $validatedData['npj'],
+                'tanggal' => $validatedData['tanggal'],
+                'customer' => $validatedData['customer'],
+                'alamat' => $validatedData['alamat'] ?? null,
+                'keterangan' => $validatedData['keterangan'] ?? null,
+                'kena_pajak' => $validatedData['kena_pajak'] ?? null,
+                'syarat_bayar' => $syaratBayar, // Gunakan syarat bayar yang sudah ada default C.O.D
+                'total_termasuk_pajak' => $validatedData['total_termasuk_pajak'] ?? null,
+                'diskon_keseluruhan' => $validatedData['diskon_keseluruhan'] ?? null,
+                'kode_customer' => $branch->customer_id,
+            ]);
+
+            // 6. Simpan detail items ke database lokal
+            foreach ($validatedData['detailItems'] as $item) {
+                DetailItemPenjualan::create([
+                    'barcode' => $item['barcode'],
+                    'npj'     => $validatedData['npj'],
+                    'qty'     => $item['kuantitas'],
+                    'harga'   => $item['harga'],
+                    'diskon'  => $item['diskon'] ?? null, // Gunakan null jika diskon tidak ada
+                ]);
+
+                // --- LOGIKA PENGURANGAN STOK ---
+                $barcode = $item['barcode'];
+                $kuantitas = (float) $item['kuantitas'];
+
+                // Temukan stok berdasarkan barcode dan kode_customer, lalu kurangi
+                $stockToUpdate = ApprovalStock::where('barcode', $barcode)
+                    ->where('kode_customer', $branch->customer_id)
+                    ->first();
+
+                // Pastikan stok ditemukan (ini sudah divalidasi di awal, tapi baik untuk safety check)
+                if ($stockToUpdate) {
+                    $stockToUpdate->decrement('panjang', $kuantitas);
+                }
+            }
+
+            // 8. Clear related cache setelah transaksi berhasil (global dan per cabang)
+            // Cache ini perlu di-invalidate karena data telah berubah:
+            // - Sales order list (ada penambahan data baru)
+            // - Create form data (mungkin ada perubahan customer/payment terms)
+            // - Barcode data (stok telah berkurang)
+            Cache::forget('accurate_sales_order_details');
+            Cache::forget('accurate_barang_list');
+            Cache::forget('accurate_sales_order_details_' . $activeBranchId);
+            Cache::forget('accurate_barang_list_' . $activeBranchId);
+
+            // 7. Redirect ke view index dengan success message
+            return redirect()->route('cashier.index')
+                ->with('success', 'Data berhasil disimpan ke Accurate dan database lokal.')
+                ->with('kasir_penjualan', $kasirPenjualan);
+        } catch (Exception $e) {
+            // Handle any exceptions (network issues, database errors, etc.)
+            return back()->withInput()->with('error', 'Terjadi kesalahan sistem: ' . $e->getMessage());
+        }
+    }
+}

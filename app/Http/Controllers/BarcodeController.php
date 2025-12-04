@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Barcode;
+use App\Models\Branch;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -23,7 +24,7 @@ class BarcodeController extends Controller
             return back()->with('error', 'Cabang belum dipilih.');
         }
 
-        $branch = \App\Models\Branch::find($activeBranchId);
+        $branch = Branch::find($activeBranchId);
         if (!$branch) {
             return back()->with('error', 'Cabang tidak valid.');
         }
@@ -63,7 +64,7 @@ class BarcodeController extends Controller
             return back()->with('error', 'Cabang belum dipilih.');
         }
 
-        $branch = \App\Models\Branch::find($activeBranchId);
+        $branch = Branch::find($activeBranchId);
         if (!$branch) {
             return back()->with('error', 'Cabang tidak valid.');
         }

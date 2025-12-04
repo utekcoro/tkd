@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Barcode;
 use App\Models\ApprovalStock;
 use App\Models\BarangMasuk;
+use App\Models\Branch;
 use App\Models\PackingList;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,21 +14,46 @@ class ApprovalStockController extends Controller
 {
     public function index(Request $request)
     {
-        $approvalStocks = ApprovalStock::where('panjang', '>', 0)->get();
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+        
+        $approvalStocks = ApprovalStock::where('kode_customer', $branch->customer_id)->where('panjang', '>', 0)->get();
         return view('approval_stock.index', compact('approvalStocks'));
     }
 
     public function updateFromBarcodes()
     {
-        // Fetch all BarangMasuk records
-        $barangMasuks = BarangMasuk::all();
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        // Fetch BarangMasuk records berdasarkan kode_customer dari cabang aktif
+        $barangMasuks = BarangMasuk::where('kode_customer', $branch->customer_id)->get();
 
         foreach ($barangMasuks as $barangMasuk) {
-            // Find the barcode associated with the nbrg
-            $barcode = Barcode::where('barcode', $barangMasuk->nbrg)->first();
+            // Find the barcode associated with the nbrg dan kode_customer
+            $barcode = Barcode::where('barcode', $barangMasuk->nbrg)
+                ->where('kode_customer', $branch->customer_id)
+                ->first();
 
-            // Cek apakah sudah ada approval stock dengan status uploaded
-            $existingApproval = ApprovalStock::where('barcode', $barangMasuk->nbrg)->first();
+            // Cek apakah sudah ada approval stock dengan status uploaded untuk cabang ini
+            $existingApproval = ApprovalStock::where('barcode', $barangMasuk->nbrg)
+                ->where('kode_customer', $branch->customer_id)
+                ->first();
             if ($existingApproval && $existingApproval->status === ApprovalStock::STATUS_UPLOADED) {
                 // Skip update jika status uploaded
                 continue;
@@ -46,7 +72,10 @@ class ApprovalStockController extends Controller
 
                 // Create or update the ApprovalStock record with status based on packing list existence
                 ApprovalStock::updateOrCreate(
-                    ['barcode' => $barangMasuk->nbrg],
+                    [
+                        'barcode' => $barangMasuk->nbrg,
+                        'kode_customer' => $branch->customer_id
+                    ],
                     [
                         'nama' => $nama,
                         'npl' => $npl,
@@ -60,7 +89,10 @@ class ApprovalStockController extends Controller
             } else {
                 // If barcode does not exist, create an ApprovalStock with status draft
                 ApprovalStock::updateOrCreate(
-                    ['barcode' => $barangMasuk->nbrg],
+                    [
+                        'barcode' => $barangMasuk->nbrg,
+                        'kode_customer' => $branch->customer_id
+                    ],
                     [
                         'nama' => null, // or any default value
                         'npl' => null, // or any default value
@@ -78,7 +110,7 @@ class ApprovalStockController extends Controller
         return redirect()->route('approval_stock.index')->with('success', 'Approval stock updated successfully.');
     }
 
-    public function formatKeterangan($keterangan)
+    private function formatKeterangan($keterangan)
     {
         // Bersihkan karakter kontrol termasuk \x1A (SUB character)
         $cleaned = preg_replace('/[\x00-\x1F\x7F-\xFF]/', '', $keterangan);

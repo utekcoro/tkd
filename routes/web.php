@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\ActivityLogController;
+use App\Http\Controllers\BarangAccurateController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ApprovalStockController;
@@ -8,7 +10,17 @@ use App\Http\Controllers\BarangMasukController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FakturController;
+use App\Http\Controllers\FakturPenjualanController;
+use App\Http\Controllers\HasilStockOpnameController;
 use App\Http\Controllers\PackingListController;
+use App\Http\Controllers\PelangganController;
+use App\Http\Controllers\PemasokController;
+use App\Http\Controllers\PenerimaanBarangController;
+use App\Http\Controllers\PengirimanPesananController;
+use App\Http\Controllers\PerintahStockOpnameController;
+use App\Http\Controllers\PesananPembelianController;
+use App\Http\Controllers\SalesController;
+use App\Http\Controllers\SatuanBarangController;
 use App\Http\Controllers\SuratJalanController;
 use App\Http\Controllers\UserController;
 
@@ -22,6 +34,52 @@ Route::middleware(['auth'])->group(function () {
 
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/dashboard', [DashboardController::class, 'dashboard'])->name('dashboard');
+
+    // Stock Opname - Full Access
+    Route::get('/perintah-stock-opname', [PerintahStockOpnameController::class, 'index'])->name('perintah_stock_opname.index');
+    Route::get('/perintah-stock-opname/detail/{number}', [PerintahStockOpnameController::class, 'show'])->name('perintah_stock_opname.detail');
+
+    // Hasil Stock Opname - Full Access
+    Route::get('/hasil-stock-opname', [HasilStockOpnameController::class, 'index'])->name('hasil_stock_opname.index');
+    Route::get('/hasil-stock-opname/detail/{number}', [HasilStockOpnameController::class, 'show'])->name('hasil_stock_opname.detail');
+    Route::get('/hasil-stock-opname/detail/{number}/{namaBarang}', [HasilStockOpnameController::class, 'showApproval'])->name('hasil_stock_opname.showApproval');
+
+    // Barang Master - Full Access
+    Route::get('/barang-master', [BarangAccurateController::class, 'index'])->name('barang_master.index');
+
+    // Satuan Barang - Full Access
+    Route::get('/satuan-barang', [SatuanBarangController::class, 'index'])->name('satuan_barang.index');
+
+    // Pesanan Pembelian - Full Access
+    Route::get('/pesanan-pembelian', [PesananPembelianController::class, 'index'])->name('pesanan_pembelian.index');
+    Route::get('/pesanan-pembelian/detail/{number}', [PesananPembelianController::class, 'show'])->name('pesanan_pembelian.detail');
+
+    // Penerimaan Barang - Full Access
+    Route::get('/penerimaan-barang', [PenerimaanBarangController::class, 'index'])->name('penerimaan-barang.index');
+    Route::get('/penerimaan-barang/create', [PenerimaanBarangController::class, 'create'])->name('penerimaan-barang.create');
+    Route::get('/penerimaan-barang/{npb}', [PenerimaanBarangController::class, 'show'])->name('penerimaan-barang.show');
+    Route::get('/penerimaan-barang/{npb}/{namaBarang}', [PenerimaanBarangController::class, 'showApproval'])->name('penerimaan-barang.showApproval');
+
+    // Pemasok - Full Access
+    Route::get('/pemasok', [PemasokController::class, 'index'])->name('pemasok.index');
+
+    // Pelanggan - Full Access
+    Route::get('/pelanggan', [PelangganController::class, 'index'])->name('pelanggan.index');
+
+    // Cashier - Full Access
+    Route::get('/cashier', [SalesController::class, 'index'])->name('cashier.index');
+    Route::get('/cashier/detail/{npj}', [SalesController::class, 'show'])->name('cashier.detail');
+
+    // Pengiriman Pesanan - Full Access
+    Route::get('/pengiriman-pesanan', [PengirimanPesananController::class, 'index'])->name('pengiriman_pesanan.index');
+    Route::get('/pengiriman-pesanan/detail/{no_pengiriman}', [PengirimanPesananController::class, 'show'])->name('pengiriman_pesanan.detail');
+
+    // Faktur Penjualan - Full Access
+    Route::get('/faktur-penjualan', [FakturPenjualanController::class, 'index'])->name('faktur_penjualan.index');
+    Route::get('/faktur-penjualan/detail/{no_faktur}', [FakturPenjualanController::class, 'show'])->name('faktur_penjualan.detail');
+
+    // Activity Log - For Non-Owner
+    Route::get('/activity-log', [ActivityLogController::class, 'index'])->name('activity_logs.index');
 
     // Route yang hanya bisa diakses oleh admin
     Route::middleware('role:super_admin')->group(function () {
@@ -47,6 +105,34 @@ Route::middleware(['auth'])->group(function () {
 
         Route::resource('barang-masuk', BarangMasukController::class);
         Route::get('/barang-masuk/detail/{id}', [BarangMasukController::class, 'show'])->name('barang_masuk_detail');
+
+        // Stock Opname - For Non-Owner
+        Route::get('/hasil-stock-opname/create', [HasilStockOpnameController::class, 'create'])->name('hasil_stock_opname.create');
+        Route::post('/hasil-stock-opname/barcode', [HasilStockOpnameController::class, 'lanjut'])->name('hasil_stock_opname.lanjut');
+        Route::post('/hasil-stock-opname/barcode/match', [HasilStockOpnameController::class, 'matchApprovalUsingAjax']);
+        Route::post('/hasil-stock-opname/barcode/individual', [HasilStockOpnameController::class, 'getIndividualBarcodeData']);
+        Route::post('/hasil-stock-opname/barcode/bulk', [HasilStockOpnameController::class, 'getBulkBarcodeData']);
+        Route::post('/hasil-stock-opname/store', [HasilStockOpnameController::class, 'store'])->name('hasil_stock_opname.store');
+
+        // Penerimaan Barang - For Non-Owner
+        Route::post('/penerimaan-barang', [PenerimaanBarangController::class, 'store'])->name('penerimaan-barang.store');
+        Route::post('/purchase-orders/detail', [PenerimaanBarangController::class, 'getDetailPo']);
+
+        // Point Of Sales (POS) - For Non-Owner
+        Route::get('/cashier/create', [SalesController::class, 'create'])->name('cashier.create');
+        Route::post('/cashier/store', [SalesController::class, 'store'])->name('cashier.store');
+        Route::post('/cashier/barcode/information', [SalesController::class, 'getBarcodeAjax']);
+        Route::post('/cashier/customer/information', [SalesController::class, 'getCustomerInfo']);
+
+        // Pengiriman Pesanan - For Non-Owner
+        Route::get('/pengiriman-pesanan/create', [PengirimanPesananController::class, 'create'])->name('pengiriman_pesanan.create');
+        Route::get('/pengiriman-pesanan/customer/{number}', [PengirimanPesananController::class, 'getCustomerByAjax'])->name('pengiriman_pesanan.getCustomer');
+        Route::post('/pengiriman-pesanan/store', [PengirimanPesananController::class, 'store'])->name('pengiriman_pesanan.store');
+
+        // Faktur Penjualan - Full CRUD
+        Route::get('/faktur-penjualan/create', [FakturPenjualanController::class, 'create'])->name('faktur_penjualan.create');
+        Route::get('/faktur-penjualan/customer/{number}', [FakturPenjualanController::class, 'getCustomerByAjax'])->name('faktur_penjualan.getCustomer');
+        Route::post('/faktur-penjualan/store', [FakturPenjualanController::class, 'store'])->name('faktur_penjualan.store');
     });
 
     Route::get('/profile', [UserController::class, 'editProfile'])->name('user.profile');

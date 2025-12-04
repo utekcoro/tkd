@@ -68,7 +68,7 @@
                             </div>
 
                             <div class="card-body">
-                                <table id="faktur" class="table table-head-fixed text-nowrap">
+                                <table id="approval_stock" class="table table-head-fixed text-nowrap">
                                     <thead>
                                         <tr>
                                             <th>Barcode</th>
