@@ -12,6 +12,7 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('customer_id')->unique();
+            $table->string('url_accurate')->nullable();
             $table->text('auth_accurate')->nullable();
             $table->text('session_accurate')->nullable();
             $table->text('accurate_api_token')->nullable();

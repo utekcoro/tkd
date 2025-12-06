@@ -16,6 +16,28 @@ use Illuminate\Support\Facades\Validator;
 
 class PenerimaanBarangController extends Controller
 {
+    /**
+     * Membangun URL API dari url_accurate branch
+     * 
+     * @param Branch $branch Branch yang aktif
+     * @param string $endpoint Endpoint API (contoh: 'purchase-order/detail.do')
+     * @return string URL lengkap untuk API
+     */
+    private function buildApiUrl($branch, $endpoint)
+    {
+        // Gunakan url_accurate dari branch, jika tidak ada gunakan default
+        $baseUrl = $branch->url_accurate ?? 'https://iris.accurate.id';
+        $baseUrl = rtrim($baseUrl, '/');
+        $apiPath = '/accurate/api';
+        
+        // Jika url_accurate sudah termasuk path /accurate/api, gunakan langsung
+        if (strpos($baseUrl, '/accurate/api') !== false) {
+            return $baseUrl . '/' . ltrim($endpoint, '/');
+        }
+        
+        return $baseUrl . $apiPath . '/' . ltrim($endpoint, '/');
+    }
+
     public function index(Request $request)
     {
         // Validasi cabang aktif
@@ -72,7 +94,7 @@ class PenerimaanBarangController extends Controller
                 $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
                 // Fetch PO details in batches untuk efisiensi
-                $detailsResult = $this->fetchPurchaseOrderDetailsInBatches($penerimaanBarang, $apiToken, $signature, $timestamp);
+                $detailsResult = $this->fetchPurchaseOrderDetailsInBatches($penerimaanBarang, $branch, $apiToken, $signature, $timestamp);
                 $detailPOs = $detailsResult['details']; // Data final
 
                 // Cek jika ada error dari proses fetch detail
@@ -126,7 +148,7 @@ class PenerimaanBarangController extends Controller
     /**
      * Fetch purchase order details in batches untuk mengoptimalkan performa
      */
-    private function fetchPurchaseOrderDetailsInBatches($penerimaanBarang, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchPurchaseOrderDetailsInBatches($penerimaanBarang, $branch, $apiToken, $signature, $timestamp, $batchSize = 5)
     {
         $detailPOs = [];
         $batches = array_chunk($penerimaanBarang->toArray(), $batchSize);
@@ -141,7 +163,7 @@ class PenerimaanBarangController extends Controller
                     continue; // skip jika tidak ada no_po
                 }
 
-                $promises[$item['no_po']] = $client->getAsync('https://iris.accurate.id/accurate/api/purchase-order/detail.do', [
+                $promises[$item['no_po']] = $client->getAsync($this->buildApiUrl($branch, 'purchase-order/detail.do'), [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
                         'X-Api-Signature' => $signature,
@@ -232,7 +254,7 @@ class PenerimaanBarangController extends Controller
 
         try {
             // Ambil semua purchase orders dengan pagination handling
-            $purchaseOrders = $this->fetchAllPurchaseOrders($apiToken, $signature, $timestamp);
+            $purchaseOrders = $this->fetchAllPurchaseOrders($branch, $apiToken, $signature, $timestamp);
 
             return $purchaseOrders;
         } catch (\Exception $e) {
@@ -247,9 +269,9 @@ class PenerimaanBarangController extends Controller
     /**
      * Fetch all purchase orders with parallel processing dan pagination handling
      */
-    private function fetchAllPurchaseOrders($apiToken, $signature, $timestamp)
+    private function fetchAllPurchaseOrders($branch, $apiToken, $signature, $timestamp)
     {
-        $poApiUrl = 'https://iris.accurate.id/accurate/api/purchase-order/list.do';
+        $poApiUrl = $this->buildApiUrl($branch, 'purchase-order/list.do');
         $data = [
             'sp.page' => 1,
             'sp.pageSize' => 20,
@@ -398,7 +420,7 @@ class PenerimaanBarangController extends Controller
                 'Authorization' => 'Bearer ' . $apiToken,
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
-            ])->get('https://iris.accurate.id/accurate/api/purchase-order/detail.do', [
+            ])->get($this->buildApiUrl($branch, 'purchase-order/detail.do'), [
                 'number' => $noPo,
             ]);
 
@@ -713,7 +735,7 @@ class PenerimaanBarangController extends Controller
             ];
 
             Log::info('Data yang akan dikirim ke Accurate API:', [
-                'endpoint' => 'https://iris.accurate.id/accurate/api/receive-item/save.do',
+                'endpoint' => $this->buildApiUrl($branch, 'receive-item/save.do'),
                 'post_data' => $postData,
                 'headers' => [
                     'Authorization' => 'Bearer [HIDDEN]',
@@ -731,7 +753,7 @@ class PenerimaanBarangController extends Controller
                 'X-Api-Timestamp' => $timestamp,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json'
-            ])->post('https://iris.accurate.id/accurate/api/receive-item/save.do', $postData);
+            ])->post($this->buildApiUrl($branch, 'receive-item/save.do'), $postData);
 
             Log::info('Response dari Accurate API:', [
                 'status_code' => $response->status(),

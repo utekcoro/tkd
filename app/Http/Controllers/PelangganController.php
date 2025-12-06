@@ -61,11 +61,12 @@ class PelangganController extends Controller
         // Get the auth and session tokens from the configuration
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
         // Define the API URL
-        $apiUrl = 'https://iris.accurate.id/accurate/api/customer/list.do';
+        $apiUrl = $baseUrl . '/customer/list.do';
 
         // Initialize variables
         $pelanggan = [];
@@ -137,7 +138,7 @@ class PelangganController extends Controller
                     }
 
                     // Setelah mendapatkan semua ID pelanggan, ambil detail untuk masing-masing secara batch
-                    $detailsResult = $this->fetchCustomerDetailsInBatches($allCustomers, $apiToken, $signature, $timestamp);
+                    $detailsResult = $this->fetchCustomerDetailsInBatches($allCustomers, $apiToken, $signature, $timestamp, $baseUrl);
                     $pelanggan = $detailsResult['details']; // Ambil data pelanggan
                     $apiSuccess = true;
 
@@ -191,7 +192,7 @@ class PelangganController extends Controller
     /**
      * Mengambil detail pelanggan dalam batch untuk mengoptimalkan performa
      */
-    private function fetchCustomerDetailsInBatches($customers, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchCustomerDetailsInBatches($customers, $apiToken, $signature, $timestamp, string $baseUrl, $batchSize = 5)
     {
         $customerDetails = [];
         $batches = array_chunk($customers, $batchSize);
@@ -204,7 +205,7 @@ class PelangganController extends Controller
             $client = new \GuzzleHttp\Client();
 
             foreach ($batch as $customer) {
-                $detailUrl = 'https://iris.accurate.id/accurate/api/customer/detail.do?id=' . $customer['id'];
+                $detailUrl = $baseUrl . '/customer/detail.do?id=' . $customer['id'];
                 $promises[$customer['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Branch;
 use Exception;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Promise\Utils;
@@ -15,7 +16,22 @@ class PesananPembelianController extends Controller
 {
     public function index(Request $request)
     {
-        $cacheKey = 'accurate_pesanan_pembelian_list';
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+            return back()->with('error', 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.');
+        }
+
+        $cacheKey = 'accurate_pesanan_pembelian_list_' . $activeBranchId;
         $cacheDuration = 10;
 
         if ($request->has('force_refresh')) {
@@ -33,11 +49,12 @@ class PesananPembelianController extends Controller
             return view('pesanan_pembelian.index', compact('pesananPembelian', 'errorMessage'));
         }
 
-        $apiToken = config('services.accurate.api_token');
-        $signatureSecret = config('services.accurate.signature_secret');
+        $apiToken = $branch->accurate_api_token;
+        $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
-        $apiUrl = 'https://iris.accurate.id/accurate/api/purchase-order/list.do';
+        $apiUrl = $baseUrl . '/purchase-order/list.do';
         $fields = 'transDate,number,statusName,vendor,totalAmount,id';
 
         $pesananPembelian = [];
@@ -114,7 +131,22 @@ class PesananPembelianController extends Controller
 
     public function show($number, Request $request)
     {
-        $cacheKey = 'accurate_pesanan_pembelian_detail_' . $number;
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+            return back()->with('error', 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.');
+        }
+
+        $cacheKey = 'accurate_pesanan_pembelian_detail_' . $activeBranchId . '_' . $number;
         $cacheDuration = 10;
 
         if ($request->has('force_refresh')) {
@@ -124,11 +156,12 @@ class PesananPembelianController extends Controller
         $errorMessage = null;
         $detail = null;
 
-        $apiToken = config('services.accurate.api_token');
-        $signatureSecret = config('services.accurate.signature_secret');
+        $apiToken = $branch->accurate_api_token;
+        $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
-        $detailApiUrl = 'https://iris.accurate.id/accurate/api/purchase-order/detail.do?number=' . $number;
+        $detailApiUrl = $baseUrl . '/purchase-order/detail.do?number=' . $number;
 
         try {
             $response = Http::withHeaders([

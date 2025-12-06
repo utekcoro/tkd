@@ -20,6 +20,28 @@ use Illuminate\Validation\ValidationException;
 
 class HasilStockOpnameController extends Controller
 {
+    /**
+     * Membangun URL API dari url_accurate branch
+     * 
+     * @param Branch $branch Branch yang aktif
+     * @param string $endpoint Endpoint API (contoh: 'stock-opname-result/list.do')
+     * @return string URL lengkap untuk API
+     */
+    private function buildApiUrl($branch, $endpoint)
+    {
+        // Gunakan url_accurate dari branch, jika tidak ada gunakan default
+        $baseUrl = $branch->url_accurate ?? 'https://iris.accurate.id';
+        $baseUrl = rtrim($baseUrl, '/');
+        $apiPath = '/accurate/api';
+        
+        // Jika url_accurate sudah termasuk path /accurate/api, gunakan langsung
+        if (strpos($baseUrl, '/accurate/api') !== false) {
+            return $baseUrl . '/' . ltrim($endpoint, '/');
+        }
+        
+        return $baseUrl . $apiPath . '/' . ltrim($endpoint, '/');
+    }
+
     public function index(Request $request)
     {
         // Validasi cabang aktif
@@ -60,7 +82,7 @@ class HasilStockOpnameController extends Controller
         $signatureSecret = $branch->accurate_signature_secret;
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
-        $apiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-result/list.do';
+        $apiUrl = $this->buildApiUrl($branch, 'stock-opname-result/list.do');
 
         $hasilstockOpname = [];
         $allHasilstockOpname = []; // Untuk menampung hasil dari list.do
@@ -121,7 +143,7 @@ class HasilStockOpnameController extends Controller
                     }
 
                     // Langkah 2: PANGGIL FUNGSI DETAIL setelah mendapatkan list
-                    $detailsResult = $this->fetchHasilStockOpnameDetailsInBatches($allHasilstockOpname, $apiToken, $signature, $timestamp);
+                    $detailsResult = $this->fetchHasilStockOpnameDetailsInBatches($allHasilstockOpname, $branch, $apiToken, $signature, $timestamp);
                     $hasilstockOpname = $detailsResult['details']; // Data final adalah data detail
 
                     // Cek jika ada error dari proses fetch detail
@@ -160,7 +182,7 @@ class HasilStockOpnameController extends Controller
     /**
      * Mengambil detail hasil stock opname dalam batch untuk mengoptimalkan performa
      */
-    private function fetchHasilStockOpnameDetailsInBatches($listHasil, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchHasilStockOpnameDetailsInBatches($listHasil, $branch, $apiToken, $signature, $timestamp, $batchSize = 5)
     {
         $hasilstockOpnameDetails = [];
         $batches = array_chunk($listHasil, $batchSize);
@@ -172,7 +194,7 @@ class HasilStockOpnameController extends Controller
 
             foreach ($batch as $hasil) {
                 if (!isset($hasil['id'])) continue;
-                $detailUrl = 'https://iris.accurate.id/accurate/api/stock-opname-result/detail.do?id=' . $hasil['id'];
+                $detailUrl = $this->buildApiUrl($branch, 'stock-opname-result/detail.do?id=' . $hasil['id']);
                 $promises[$hasil['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
@@ -248,7 +270,7 @@ class HasilStockOpnameController extends Controller
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
         // Fetch detail for specific number - selalu coba dari API terlebih dahulu
-        $detailApiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-result/detail.do?number=' . $number;
+        $detailApiUrl = $this->buildApiUrl($branch, 'stock-opname-result/detail.do?number=' . $number);
 
         try {
             $response = Http::withHeaders([
@@ -269,7 +291,7 @@ class HasilStockOpnameController extends Controller
                     $detail = $detailData['d'];
 
                     // Fetch all stock opname results list dengan parallel processing
-                    $hasilstockOpname = $this->getAllHasilStockOpnameList($apiToken, $signature, $timestamp);
+                    $hasilstockOpname = $this->getAllHasilStockOpnameList($branch, $apiToken, $signature, $timestamp);
 
                     $dataToCache = [
                         'detail' => $detail,
@@ -317,9 +339,9 @@ class HasilStockOpnameController extends Controller
     /**
      * Mengambil semua data hasil stock opname list dengan parallel processing
      */
-    private function getAllHasilStockOpnameList($apiToken, $signature, $timestamp)
+    private function getAllHasilStockOpnameList($branch, $apiToken, $signature, $timestamp)
     {
-        $listApiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-result/list.do';
+        $listApiUrl = $this->buildApiUrl($branch, 'stock-opname-result/list.do');
         $data = [
             'sp.page' => 1,
             'sp.pageSize' => 20
@@ -375,7 +397,7 @@ class HasilStockOpnameController extends Controller
                 }
 
                 // Ambil detail untuk masing-masing hasil stock opname secara batch
-                return $this->fetchHasilStockOpnameDetailsInBatches($allHasilstockOpname, $apiToken, $signature, $timestamp);
+                return $this->fetchHasilStockOpnameDetailsInBatches($allHasilstockOpname, $branch, $apiToken, $signature, $timestamp);
             }
         }
 
@@ -384,6 +406,22 @@ class HasilStockOpnameController extends Controller
 
     public function showApproval($number, $namaBarang, Request $request)
     {
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        // Validasi kredensial Accurate
+        if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+            return back()->with('error', 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.');
+        }
+
         // Cache key yang unik
         $cacheKey = 'accurate_hasil_stock_opname_approval_' . $number . '_' . md5($namaBarang);
         // Tetapkan waktu cache (dalam menit)
@@ -399,13 +437,13 @@ class HasilStockOpnameController extends Controller
         $approvals = null;
         $search_info = null;
 
-        // Get the auth and session tokens from the configuration
-        $apiToken = config('services.accurate.api_token');
-        $signatureSecret = config('services.accurate.signature_secret');
+        // Ambil kredensial Accurate dari branch
+        $apiToken = $branch->accurate_api_token;
+        $signatureSecret = $branch->accurate_signature_secret;
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
-        $detailApiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-result/detail.do?number=' . $number;
+        $detailApiUrl = $this->buildApiUrl($branch, 'stock-opname-result/detail.do?number=' . $number);
 
         try {
             // Selalu coba ambil data dari API terlebih dahulu
@@ -435,8 +473,6 @@ class HasilStockOpnameController extends Controller
                     ]);
 
                     // Validasi apakah approval dengan nama barang tersebut ada (exact match) berdasarkan kode_customer
-                    $activeBranchId = session('active_branch');
-                    $branch = Branch::find($activeBranchId);
                     $approvalByName = ApprovalStock::where('nama', $namaBarangFormatted)
                         ->where('kode_customer', $branch->customer_id ?? '')
                         ->first();
@@ -685,17 +721,33 @@ class HasilStockOpnameController extends Controller
 
     public function create(Request $request)
     {
-        // Get the auth and session tokens from the configuration
-        $apiToken = config('services.accurate.api_token');
-        $signatureSecret = config('services.accurate.signature_secret');
+        // Validasi cabang aktif
+        $activeBranchId = session('active_branch');
+        if (!$activeBranchId) {
+            return back()->with('error', 'Cabang belum dipilih.');
+        }
+
+        $branch = Branch::find($activeBranchId);
+        if (!$branch) {
+            return back()->with('error', 'Cabang tidak valid.');
+        }
+
+        // Validasi kredensial Accurate
+        if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+            return back()->with('error', 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.');
+        }
+
+        // Ambil kredensial Accurate dari branch
+        $apiToken = $branch->accurate_api_token;
+        $signatureSecret = $branch->accurate_signature_secret;
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
-        // Ambil daftar stock opname result yang sudah ada dengan parallel processing
-        $existingResultNumbers = $this->getExistingResultNumbers($apiToken, $signature, $timestamp);
+            // Ambil daftar stock opname result yang sudah ada dengan parallel processing
+            $existingResultNumbers = $this->getExistingResultNumbers($branch, $apiToken, $signature, $timestamp);
 
-        // Ambil daftar order dengan parallel processing
-        $stockOpnameOrders = $this->getStockOpnameOrders($apiToken, $signature, $timestamp, $existingResultNumbers);
+            // Ambil daftar order dengan parallel processing
+            $stockOpnameOrders = $this->getStockOpnameOrders($branch, $apiToken, $signature, $timestamp, $existingResultNumbers);
 
         $nop = HasilStockOpname::generateNop();
         $formReadonly = false;
@@ -709,9 +761,9 @@ class HasilStockOpnameController extends Controller
     /**
      * Mengambil daftar stock opname result yang sudah ada
      */
-    private function getExistingResultNumbers($apiToken, $signature, $timestamp)
+    private function getExistingResultNumbers($branch, $apiToken, $signature, $timestamp)
     {
-        $resultApiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-result/list.do';
+        $resultApiUrl = $this->buildApiUrl($branch, 'stock-opname-result/list.do');
         $data = [
             'sp.page' => 1,
             'sp.pageSize' => 20
@@ -768,7 +820,7 @@ class HasilStockOpnameController extends Controller
                 }
 
                 // Ambil detail untuk setiap result secara batch
-                $resultDetails = $this->fetchResultDetailsInBatches($allResults, $apiToken, $signature, $timestamp);
+                $resultDetails = $this->fetchResultDetailsInBatches($allResults, $branch, $apiToken, $signature, $timestamp);
 
                 foreach ($resultDetails as $detail) {
                     if (isset($detail['order']['number'])) {
@@ -784,7 +836,7 @@ class HasilStockOpnameController extends Controller
     /**
      * Mengambil detail stock opname result dalam batch untuk mengoptimalkan performa
      */
-    private function fetchResultDetailsInBatches($stockOpnameResults, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchResultDetailsInBatches($stockOpnameResults, $branch, $apiToken, $signature, $timestamp, $batchSize = 5)
     {
         $resultDetails = [];
         $batches = array_chunk($stockOpnameResults, $batchSize);
@@ -794,7 +846,7 @@ class HasilStockOpnameController extends Controller
             $client = new \GuzzleHttp\Client();
 
             foreach ($batch as $result) {
-                $detailUrl = 'https://iris.accurate.id/accurate/api/stock-opname-result/detail.do?id=' . $result['id'];
+                $detailUrl = $this->buildApiUrl($branch, 'stock-opname-result/detail.do?id=' . $result['id']);
                 $promises[$result['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
@@ -831,9 +883,9 @@ class HasilStockOpnameController extends Controller
      * Mengambil daftar stock opname orders dengan parallel processing
      * dan memfilter yang belum memiliki result
      */
-    private function getStockOpnameOrders($apiToken, $signature, $timestamp, $existingResultNumbers = [])
+    private function getStockOpnameOrders($branch, $apiToken, $signature, $timestamp, $existingResultNumbers = [])
     {
-        $orderApiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-order/list.do';
+        $orderApiUrl = $this->buildApiUrl($branch, 'stock-opname-order/list.do');
         $data = [
             'sp.page' => 1,
             'sp.pageSize' => 20
@@ -895,7 +947,7 @@ class HasilStockOpnameController extends Controller
                 }
 
                 // Ambil detail untuk setiap order secara batch
-                $orderDetails = $this->fetchOrderDetailsInBatches($allOrders, $apiToken, $signature, $timestamp);
+                $orderDetails = $this->fetchOrderDetailsInBatches($allOrders, $branch, $apiToken, $signature, $timestamp);
 
                 // Filter orders yang belum memiliki result
                 foreach ($orderDetails as $orderDetail) {
@@ -930,7 +982,7 @@ class HasilStockOpnameController extends Controller
     /**
      * Mengambil detail stock opname orders dalam batch untuk mengoptimalkan performa
      */
-    private function fetchOrderDetailsInBatches($orders, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchOrderDetailsInBatches($orders, $branch, $apiToken, $signature, $timestamp, $batchSize = 5)
     {
         $orderDetails = [];
         $batches = array_chunk($orders, $batchSize);
@@ -940,7 +992,7 @@ class HasilStockOpnameController extends Controller
             $client = new \GuzzleHttp\Client();
 
             foreach ($batch as $order) {
-                $detailUrl = 'https://iris.accurate.id/accurate/api/stock-opname-order/detail.do?id=' . $order['id'];
+                $detailUrl = $this->buildApiUrl($branch, 'stock-opname-order/detail.do?id=' . $order['id']);
                 $promises[$order['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
@@ -976,9 +1028,9 @@ class HasilStockOpnameController extends Controller
     /**
      * Helper function to fetch all stock opname orders with parallel processing
      */
-    private function fetchAllStockOpnameOrders($apiToken, $signature, $timestamp)
+    private function fetchAllStockOpnameOrders($branch, $apiToken, $signature, $timestamp)
     {
-        $orderApiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-order/list.do';
+        $orderApiUrl = $this->buildApiUrl($branch, 'stock-opname-order/list.do');
         $data = [
             'sp.page' => 1,
             'sp.pageSize' => 20
@@ -1043,7 +1095,7 @@ class HasilStockOpnameController extends Controller
                 }
 
                 // Ambil detail untuk setiap order secara batch
-                $orderDetails = $this->fetchOrderDetailsInBatches($allOrders, $apiToken, $signature, $timestamp);
+                $orderDetails = $this->fetchOrderDetailsInBatches($allOrders, $branch, $apiToken, $signature, $timestamp);
 
                 Log::info('All stock opname orders fetched successfully', [
                     'total_orders' => count($allOrders),
@@ -1076,14 +1128,39 @@ class HasilStockOpnameController extends Controller
 
             $stockOpnameNumber = $request->input('stock_opname');
 
-            // Get API credentials
-            $apiToken = config('services.accurate.api_token');
-            $signatureSecret = config('services.accurate.signature_secret');
+            // Validasi cabang aktif
+            $activeBranchId = session('active_branch');
+            if (!$activeBranchId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cabang belum dipilih.'
+                ], 400);
+            }
+
+            $branch = Branch::find($activeBranchId);
+            if (!$branch) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cabang tidak valid.'
+                ], 400);
+            }
+
+            // Validasi kredensial Accurate
+            if (!$branch->accurate_api_token || !$branch->accurate_signature_secret) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Kredensial Accurate untuk cabang ini belum dikonfigurasi.'
+                ], 400);
+            }
+
+            // Ambil kredensial Accurate dari branch
+            $apiToken = $branch->accurate_api_token;
+            $signatureSecret = $branch->accurate_signature_secret;
             $timestamp = Carbon::now()->toIso8601String();
             $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
             // Fetch all stock opname orders with parallel processing
-            $stockOpnameOrders = $this->fetchAllStockOpnameOrders($apiToken, $signature, $timestamp);
+            $stockOpnameOrders = $this->fetchAllStockOpnameOrders($branch, $apiToken, $signature, $timestamp);
 
             $stockOpnameId = null;
             $barang = [];
@@ -1248,7 +1325,7 @@ class HasilStockOpnameController extends Controller
             $barang = [];
 
             // Fetch stock opname orders langsung dari API (untuk logging saja)
-            $stockOpnameOrders = $this->fetchAllStockOpnameOrders($apiToken, $signature, $timestamp);
+            $stockOpnameOrders = $this->fetchAllStockOpnameOrders($branch, $apiToken, $signature, $timestamp);
 
             foreach ($stockOpnameOrders as $order) {
                 if (isset($order['number']) && $order['number'] == $stockOpnameNumber) {
@@ -1382,7 +1459,7 @@ class HasilStockOpnameController extends Controller
                     'X-Api-Timestamp' => $timestamp,
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json'
-                ])->post('https://iris.accurate.id/accurate/api/stock-opname-result/save.do', $postData);
+                ])->post($this->buildApiUrl($branch, 'stock-opname-result/save.do'), $postData);
 
                 if ($response->successful()) {
                     // Commit transaction jika semua berhasil
@@ -1419,24 +1496,6 @@ class HasilStockOpnameController extends Controller
                     return redirect()->route('hasil_stock_opname.index')
                         ->with('error', 'Gagal mengirim data ke API Accurate: ' . $errorMessage);
                 }
-
-                // Commit transaction (karena Accurate dinonaktifkan)
-                DB::commit();
-
-                Log::info('=== TRANSACTION COMMITTED ===');
-                Log::info('Data berhasil disimpan ke database lokal', [
-                    'nop' => $validated['nop'],
-                    'hasil_stock_opname_id' => $hasilStockOpname->id,
-                    'barcode_saved_count' => $savedBarcodeCount
-                ]);
-
-                $successMessage = "Berhasil menyimpan hasil stock opname '{$validated['nop']}' (Upload Accurate dinonaktifkan)";
-                if ($savedBarcodeCount > 0) {
-                    $successMessage .= " dengan {$savedBarcodeCount} barcode";
-                }
-
-                return redirect()->route('hasil_stock_opname.index')
-                    ->with('success', $successMessage);
             } catch (Exception $e) {
                 DB::rollback();
 

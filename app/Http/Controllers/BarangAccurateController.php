@@ -57,9 +57,10 @@ class BarangAccurateController extends Controller
         // Ambil kredensial Accurate dari branch (sudah otomatis didekripsi oleh accessor di model Branch)
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
-        $apiUrl = 'https://iris.accurate.id/accurate/api/item/list.do';
+        $apiUrl = $baseUrl . '/item/list.do';
         $fields = 'name,no,itemTypeName,unit1,availableToSell';
 
         $barang = [];

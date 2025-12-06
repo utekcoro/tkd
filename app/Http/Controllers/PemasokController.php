@@ -65,13 +65,14 @@ class PemasokController extends Controller
         }
 
         // Get the auth and session tokens from the configuration
-        $apiToken = config('services.accurate.api_token');
-        $signatureSecret = config('services.accurate.signature_secret');
+        $apiToken = $branch->accurate_api_token;
+        $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
         // Define the API URL and query parameters
-        $apiUrl = 'https://iris.accurate.id/accurate/api/vendor/list.do';
+        $apiUrl = $baseUrl . '/vendor/list.do';
         $data = [
             'fields' => 'name,billStreet,wpName,vendorNo,balance,id',
             'sp.page' => 1,
@@ -152,7 +153,7 @@ class PemasokController extends Controller
                     }
 
                     // Setelah mendapatkan semua ID pemasok, ambil detail untuk masing-masing secara batch
-                    $detailsResult = $this->fetchPemasokDetailsInBatches($allPemasok, $apiToken, $signature, $timestamp);
+                    $detailsResult = $this->fetchPemasokDetailsInBatches($allPemasok, $apiToken, $signature, $timestamp, $baseUrl);
                     $pemasok = $detailsResult['details']; // Ambil data pemasok
                     $apiSuccess = true;
 
@@ -209,7 +210,7 @@ class PemasokController extends Controller
     /**
      * Mengambil detail pemasok dalam batch untuk mengoptimalkan performa
      */
-    private function fetchPemasokDetailsInBatches($pemasok, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchPemasokDetailsInBatches($pemasok, $apiToken, $signature, $timestamp, string $baseUrl, $batchSize = 5)
     {
         $pemasokDetails = [];
         $batches = array_chunk($pemasok, $batchSize);
@@ -222,7 +223,7 @@ class PemasokController extends Controller
             $client = new \GuzzleHttp\Client();
 
             foreach ($batch as $pemasok) {
-                $detailUrl = 'https://iris.accurate.id/accurate/api/vendor/detail.do?id=' . $pemasok['id'];
+                $detailUrl = $baseUrl . '/vendor/detail.do?id=' . $pemasok['id'];
                 $promises[$pemasok['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,

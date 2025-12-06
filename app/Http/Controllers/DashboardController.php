@@ -48,6 +48,7 @@ class DashboardController extends Controller
         // Get API credentials from branch (auto-decrypted by model accessors)
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
@@ -111,7 +112,7 @@ class DashboardController extends Controller
                     $totalBarangAccurate = Cache::get($barangCacheKey);
                     Log::info('Total barang Accurate diambil dari cache: ' . $totalBarangAccurate);
                 } else {
-                    $apiUrl = 'https://iris.accurate.id/accurate/api/item/list.do';
+                    $apiUrl = $baseUrl . '/item/list.do';
                     $fields = 'name,no,itemTypeName,unit1,availableToSell';
 
                     $firstPageResponse = Http::withHeaders([
@@ -142,7 +143,7 @@ class DashboardController extends Controller
                     $totalAvailableToSell = Cache::get($availableToSellCacheKey);
                     Log::info('Total availableToSell diambil dari cache: ' . $totalAvailableToSell);
                 } else {
-                    $apiUrl = 'https://iris.accurate.id/accurate/api/item/list.do';
+                    $apiUrl = $baseUrl . '/item/list.do';
                     $fields = 'availableToSell';
 
                     // Mengambil semua data barang untuk menghitung total availableToSell
@@ -365,7 +366,7 @@ class DashboardController extends Controller
                 'Authorization' => 'Bearer ' . $apiToken,
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
-            ])->get('https://iris.accurate.id/accurate/api/sales-order/detail.do', [
+            ])->get($baseUrl . '/sales-order/detail.do', [
                 'number' => $npj,
             ]);
 

@@ -14,6 +14,7 @@ class Branch extends Model
         'name',
         'customer_id',
         'photo',
+        'url_accurate',
         'auth_accurate',
         'session_accurate',
         'accurate_api_token',

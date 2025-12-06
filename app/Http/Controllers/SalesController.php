@@ -18,6 +18,28 @@ use Illuminate\Validation\ValidationException;
 
 class SalesController extends Controller
 {
+    /**
+     * Membangun URL API dari url_accurate branch
+     * 
+     * @param Branch $branch Branch yang aktif
+     * @param string $endpoint Endpoint API (contoh: 'sales-order/detail.do')
+     * @return string URL lengkap untuk API
+     */
+    private function buildApiUrl($branch, $endpoint)
+    {
+        // Gunakan url_accurate dari branch, jika tidak ada gunakan default
+        $baseUrl = $branch->url_accurate ?? 'https://iris.accurate.id';
+        $baseUrl = rtrim($baseUrl, '/');
+        $apiPath = '/accurate/api';
+        
+        // Jika url_accurate sudah termasuk path /accurate/api, gunakan langsung
+        if (strpos($baseUrl, '/accurate/api') !== false) {
+            return $baseUrl . '/' . ltrim($endpoint, '/');
+        }
+        
+        return $baseUrl . $apiPath . '/' . ltrim($endpoint, '/');
+    }
+
     public function index(Request $request)
     {
         // Validasi cabang aktif
@@ -75,7 +97,7 @@ class SalesController extends Controller
 
             try {
                 // Selalu coba ambil data dari API terlebih dahulu
-                $detailsResult = $this->fetchSalesOrderDetailsInBatches($kasirPenjualan, $apiToken, $signature, $timestamp);
+                $detailsResult = $this->fetchSalesOrderDetailsInBatches($kasirPenjualan, $branch, $apiToken, $signature, $timestamp);
                 $detailPP = $detailsResult['details']; // Data final
 
                 // Cek jika ada error dari proses fetch detail
@@ -129,7 +151,7 @@ class SalesController extends Controller
     /**
      * Mengambil detail sales order dalam batch untuk mengoptimalkan performa
      */
-    private function fetchSalesOrderDetailsInBatches($kasirPenjualanCollection, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchSalesOrderDetailsInBatches($kasirPenjualanCollection, $branch, $apiToken, $signature, $timestamp, $batchSize = 5)
     {
         $detailPP = [];
         $validItems = $kasirPenjualanCollection->filter(function ($item) {
@@ -144,7 +166,7 @@ class SalesController extends Controller
             $client = new \GuzzleHttp\Client();
 
             foreach ($batch as $item) {
-                $detailUrl = 'https://iris.accurate.id/accurate/api/sales-order/detail.do?number=' . $item->npj;
+                $detailUrl = $this->buildApiUrl($branch, 'sales-order/detail.do?number=' . $item->npj);
                 $promises[$item->npj] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
@@ -273,7 +295,7 @@ class SalesController extends Controller
                     'Authorization' => 'Bearer ' . $apiToken,
                     'X-Api-Signature' => $signature,
                     'X-Api-Timestamp' => $timestamp,
-                ])->get('https://iris.accurate.id/accurate/api/sales-order/detail.do', [
+                ])->get($this->buildApiUrl($branch, 'sales-order/detail.do'), [
                     'number' => $kasirPenjualan->npj,
                 ]);
 
@@ -506,11 +528,11 @@ class SalesController extends Controller
 
         try {
             // Fetch data secara parallel untuk mendapatkan data real-time
-            $customerData = $this->fetchCustomersFromAccurate($apiToken, $signature, $timestamp);
+            $customerData = $this->fetchCustomersFromAccurate($branch, $apiToken, $signature, $timestamp);
             $pelanggan = $customerData['customers'];
             $accurateErrors = array_merge($accurateErrors, $customerData['errors']);
 
-            $paymentTermData = $this->fetchPaymentTermsFromAccurate($apiToken, $signature, $timestamp);
+            $paymentTermData = $this->fetchPaymentTermsFromAccurate($branch, $apiToken, $signature, $timestamp);
             $paymentTerms = $paymentTermData['paymentTerms'];
             $accurateErrors = array_merge($accurateErrors, $paymentTermData['errors']);
 
@@ -532,13 +554,13 @@ class SalesController extends Controller
     /**
      * Fetch customers data from Accurate API with pagination and parallel processing
      */
-    private function fetchCustomersFromAccurate($apiToken, $signature, $timestamp)
+    private function fetchCustomersFromAccurate($branch, $apiToken, $signature, $timestamp)
     {
         $customers = [];
         $errors = [];
 
         try {
-            $customerApiUrl = 'https://iris.accurate.id/accurate/api/customer/list.do';
+            $customerApiUrl = $this->buildApiUrl($branch, 'customer/list.do');
             $data = [
                 'sp.page' => 1,
                 'sp.pageSize' => 20
@@ -595,7 +617,7 @@ class SalesController extends Controller
                     }
 
                     // Fetch customer details dalam batch
-                    $customers = $this->fetchCustomerDetailsInBatches($allCustomers, $apiToken, $signature, $timestamp);
+                    $customers = $this->fetchCustomerDetailsInBatches($allCustomers, $branch, $apiToken, $signature, $timestamp);
                 } else {
                     $errors[] = 'Unexpected customer list response structure from Accurate.';
                 }
@@ -615,7 +637,7 @@ class SalesController extends Controller
     /**
      * Fetch customer details dalam batch
      */
-    private function fetchCustomerDetailsInBatches($customerList, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchCustomerDetailsInBatches($customerList, $branch, $apiToken, $signature, $timestamp, $batchSize = 5)
     {
         $customerDetails = [];
         $batches = array_chunk($customerList, $batchSize);
@@ -625,7 +647,7 @@ class SalesController extends Controller
             $client = new \GuzzleHttp\Client();
 
             foreach ($batch as $customer) {
-                $detailUrl = 'https://iris.accurate.id/accurate/api/customer/detail.do?id=' . $customer['id'];
+                $detailUrl = $this->buildApiUrl($branch, 'customer/detail.do?id=' . $customer['id']);
                 $promises[$customer['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
@@ -657,7 +679,7 @@ class SalesController extends Controller
     /**
      * Fetch payment terms data from Accurate API
      */
-    private function fetchPaymentTermsFromAccurate($apiToken, $signature, $timestamp)
+    private function fetchPaymentTermsFromAccurate($branch, $apiToken, $signature, $timestamp)
     {
         $paymentTerms = [];
         $errors = [];
@@ -667,7 +689,7 @@ class SalesController extends Controller
                 'Authorization' => 'Bearer ' . $apiToken,
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
-            ])->get('https://iris.accurate.id/accurate/api/payment-term/list.do');
+            ])->get($this->buildApiUrl($branch, 'payment-term/list.do'));
 
             if ($paymentTermResponse->successful()) {
                 $responseData = $paymentTermResponse->json();
@@ -738,7 +760,7 @@ class SalesController extends Controller
                     'Authorization' => 'Bearer ' . $apiToken,
                     'X-Api-Signature' => $signature,
                     'X-Api-Timestamp' => $timestamp,
-                ])->post('https://iris.accurate.id/accurate/api/customer/detail.do', [
+                ])->post($this->buildApiUrl($branch, 'customer/detail.do'), [
                     'customerNo' => $customerNo
                 ]);
 
@@ -890,7 +912,7 @@ class SalesController extends Controller
                         'Authorization' => 'Bearer ' . $apiToken,
                         'X-Api-Signature' => $signature,
                         'X-Api-Timestamp' => $timestamp,
-                    ])->get('https://iris.accurate.id/accurate/api/item/list.do', [
+                    ])->get($this->buildApiUrl($branch, 'item/list.do'), [
                         'fields' => 'name,no,unit1,unitPrice',
                         'sp.pageSize' => $pageSize,
                         'sp.page' => $page,
@@ -1198,7 +1220,7 @@ class SalesController extends Controller
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
                 'Content-Type'  => 'application/json',
-            ])->post('https://iris.accurate.id/accurate/api/sales-order/save.do', $postDataForAccurate);
+            ])->post($this->buildApiUrl($branch, 'sales-order/save.do'), $postDataForAccurate);
 
             // 4. Validasi response dari API Accurate
             if (!$response->successful()) {

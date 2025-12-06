@@ -16,6 +16,28 @@ use Illuminate\Support\Facades\Validator;
 
 class PengirimanPesananController extends Controller
 {
+    /**
+     * Membangun URL API dari url_accurate branch
+     * 
+     * @param Branch $branch Branch yang aktif
+     * @param string $endpoint Endpoint API (contoh: 'delivery-order/list.do')
+     * @return string URL lengkap untuk API
+     */
+    private function buildApiUrl($branch, $endpoint)
+    {
+        // Gunakan url_accurate dari branch, jika tidak ada gunakan default
+        $baseUrl = $branch->url_accurate ?? 'https://iris.accurate.id';
+        $baseUrl = rtrim($baseUrl, '/');
+        $apiPath = '/accurate/api';
+        
+        // Jika url_accurate sudah termasuk path /accurate/api, gunakan langsung
+        if (strpos($baseUrl, '/accurate/api') !== false) {
+            return $baseUrl . '/' . ltrim($endpoint, '/');
+        }
+        
+        return $baseUrl . $apiPath . '/' . ltrim($endpoint, '/');
+    }
+
     public function index(Request $request)
     {
         // Validasi active_branch session
@@ -72,7 +94,7 @@ class PengirimanPesananController extends Controller
             $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
             // Define the API URL for listing delivery orders
-            $listApiUrl = 'https://iris.accurate.id/accurate/api/delivery-order/list.do';
+            $listApiUrl = $this->buildApiUrl($branch, 'delivery-order/list.do');
             $data = [
                 'sp.page' => 1,
                 'sp.pageSize' => 20
@@ -145,7 +167,7 @@ class PengirimanPesananController extends Controller
                     }
 
                     // Setelah mendapatkan semua ID delivery order, ambil detail untuk masing-masing secara batch
-                    $detailsResult = $this->fetchDeliveryOrderDetailsInBatches($allDeliveryOrders, $apiToken, $signature, $timestamp);
+                    $detailsResult = $this->fetchDeliveryOrderDetailsInBatches($allDeliveryOrders, $branch, $apiToken, $signature, $timestamp);
                     $pengirimanPesanan = $detailsResult['details'];
                     
                     // Cek jika ada error dari proses fetch detail
@@ -205,7 +227,7 @@ class PengirimanPesananController extends Controller
     /**
      * Mengambil detail delivery order dalam batch untuk mengoptimalkan performa
      */
-    private function fetchDeliveryOrderDetailsInBatches($deliveryOrders, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchDeliveryOrderDetailsInBatches($deliveryOrders, $branch, $apiToken, $signature, $timestamp, $batchSize = 5)
     {
         $deliveryOrderDetails = [];
         $batches = array_chunk($deliveryOrders, $batchSize);
@@ -216,7 +238,7 @@ class PengirimanPesananController extends Controller
             $client = new \GuzzleHttp\Client();
 
             foreach ($batch as $order) {
-                $detailUrl = 'https://iris.accurate.id/accurate/api/delivery-order/detail.do?id=' . $order['id'];
+                $detailUrl = $this->buildApiUrl($branch, 'delivery-order/detail.do?id=' . $order['id']);
                 $promises[$order['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
@@ -320,7 +342,7 @@ class PengirimanPesananController extends Controller
      */
     private function fetchAllSalesOrders($apiToken, $signature, $timestamp, Branch $branch)
     {
-        $salesOrderApiUrl = 'https://iris.accurate.id/accurate/api/sales-order/list.do';
+        $salesOrderApiUrl = $this->buildApiUrl($branch, 'sales-order/list.do');
         $data = [
             'sp.page' => 1,
             'sp.pageSize' => 20,
@@ -444,7 +466,7 @@ class PengirimanPesananController extends Controller
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
         // Define the API URL for sales order detail
-        $detailApiUrl = 'https://iris.accurate.id/accurate/api/sales-order/detail.do';
+        $detailApiUrl = $this->buildApiUrl($branch, 'sales-order/detail.do');
 
         try {
             // Make API request to get sales order detail
@@ -621,7 +643,7 @@ class PengirimanPesananController extends Controller
                         'Authorization' => 'Bearer ' . $apiToken,
                         'X-Api-Signature' => $signature,
                         'X-Api-Timestamp' => $timestamp,
-                    ])->get('https://iris.accurate.id/accurate/api/sales-order/detail.do', [
+                    ])->get($this->buildApiUrl($branch, 'sales-order/detail.do'), [
                         'number' => $validatedData['penjualan_id']
                     ]);
 
@@ -738,7 +760,7 @@ class PengirimanPesananController extends Controller
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
                 'Content-Type'  => 'application/json',
-            ])->post('https://iris.accurate.id/accurate/api/delivery-order/save.do', $postDataForAccurate);
+            ])->post($this->buildApiUrl($branch, 'delivery-order/save.do'), $postDataForAccurate);
 
             // Validasi response dari API Accurate
             if (!$response->successful()) {
@@ -851,7 +873,7 @@ class PengirimanPesananController extends Controller
             if ($pengirimanPesanan->no_pengiriman) {
                 Log::info("Fetching delivery order from Accurate API:", ['no_pengiriman' => $pengirimanPesanan->no_pengiriman]);
 
-                $deliveryOrderResponse = $httpClient->get('https://iris.accurate.id/accurate/api/delivery-order/detail.do', [
+                $deliveryOrderResponse = $httpClient->get($this->buildApiUrl($branch, 'delivery-order/detail.do'), [
                     'number' => $pengirimanPesanan->no_pengiriman,
                 ]);
 
@@ -882,7 +904,7 @@ class PengirimanPesananController extends Controller
             if ($pengirimanPesanan->penjualan_id) {
                 Log::info("Fetching sales order from Accurate API:", ['penjualan_id' => $pengirimanPesanan->penjualan_id]);
 
-                $salesOrderResponse = $httpClient->get('https://iris.accurate.id/accurate/api/sales-order/detail.do', [
+                $salesOrderResponse = $httpClient->get($this->buildApiUrl($branch, 'sales-order/detail.do'), [
                     'number' => $pengirimanPesanan->penjualan_id,
                 ]);
 

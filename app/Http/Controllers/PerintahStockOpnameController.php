@@ -54,9 +54,10 @@ class PerintahStockOpnameController extends Controller
         // getAccurateApiTokenAttribute & getAccurateSignatureSecretAttribute akan memanggil Crypt::decryptString()
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
-        $apiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-order/list.do';
+        $apiUrl = $baseUrl . '/stock-opname-order/list.do';
 
         $perintahstockOpname = [];
         $allPerintahstockOpname = []; // Untuk menampung hasil dari list.do
@@ -117,7 +118,7 @@ class PerintahStockOpnameController extends Controller
                     }
 
                     // Langkah 2: Panggil fungsi untuk mengambil detail secara batch
-                    $detailsResult = $this->fetchPerintahstockOpnameDetailsInBatches($allPerintahstockOpname, $apiToken, $signature, $timestamp);
+                    $detailsResult = $this->fetchPerintahstockOpnameDetailsInBatches($allPerintahstockOpname, $apiToken, $signature, $timestamp, $baseUrl);
                     $perintahstockOpname = $detailsResult['details']; // Data final
 
                     // Cek jika ada error dari proses fetch detail
@@ -156,7 +157,7 @@ class PerintahStockOpnameController extends Controller
     /**
      * Mengambil detail perintah stock opname dalam batch untuk mengoptimalkan performa
      */
-    private function fetchPerintahstockOpnameDetailsInBatches($listPerintah, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchPerintahstockOpnameDetailsInBatches($listPerintah, $apiToken, $signature, $timestamp, string $baseUrl, $batchSize = 5)
     {
         $perintahstockOpnameDetails = [];
         $batches = array_chunk($listPerintah, $batchSize);
@@ -168,7 +169,7 @@ class PerintahStockOpnameController extends Controller
 
             foreach ($batch as $perintah) {
                 if (!isset($perintah['id'])) continue;
-                $detailUrl = 'https://iris.accurate.id/accurate/api/stock-opname-order/detail.do?id=' . $perintah['id'];
+                $detailUrl = $baseUrl . '/stock-opname-order/detail.do?id=' . $perintah['id'];
                 $promises[$perintah['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
@@ -236,9 +237,10 @@ class PerintahStockOpnameController extends Controller
         // getAccurateApiTokenAttribute & getAccurateSignatureSecretAttribute akan memanggil Crypt::decryptString()
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
-        $detailApiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-order/detail.do?number=' . $number;
+        $detailApiUrl = $baseUrl . '/stock-opname-order/detail.do?number=' . $number;
 
         try {
             $response = Http::withHeaders([

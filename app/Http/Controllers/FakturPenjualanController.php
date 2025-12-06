@@ -62,11 +62,12 @@ class FakturPenjualanController extends Controller
         // Get API credentials from branch (auto-decrypted by model accessors)
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
         // Define the API URL for listing sales invoices
-        $listApiUrl = 'https://iris.accurate.id/accurate/api/sales-invoice/list.do';
+        $listApiUrl = $baseUrl . '/sales-invoice/list.do';
         $data = [
             'sp.page' => 1,
             'sp.pageSize' => 20
@@ -147,7 +148,7 @@ class FakturPenjualanController extends Controller
                     }
 
                     // Setelah mendapatkan semua ID faktur penjualan, ambil detail untuk masing-masing secara batch
-                    $detailsResult = $this->fetchSalesInvoiceDetailsInBatches($allSalesInvoices, $apiToken, $signature, $timestamp);
+                    $detailsResult = $this->fetchSalesInvoiceDetailsInBatches($allSalesInvoices, $apiToken, $signature, $timestamp, $baseUrl);
                     $fakturPenjualan = $detailsResult['details'];
                     
                     // Cek jika ada error dari proses fetch detail
@@ -197,7 +198,7 @@ class FakturPenjualanController extends Controller
     /**
      * Mengambil detail faktur penjualan dalam batch untuk mengoptimalkan performa
      */
-    private function fetchSalesInvoiceDetailsInBatches($salesInvoices, $apiToken, $signature, $timestamp, $batchSize = 5)
+    private function fetchSalesInvoiceDetailsInBatches($salesInvoices, $apiToken, $signature, $timestamp, $baseUrl, $batchSize = 5)
     {
         $salesInvoiceDetails = [];
         $batches = array_chunk($salesInvoices, $batchSize);
@@ -208,7 +209,7 @@ class FakturPenjualanController extends Controller
             $client = new \GuzzleHttp\Client();
 
             foreach ($batch as $invoice) {
-                $detailUrl = 'https://iris.accurate.id/accurate/api/sales-invoice/detail.do?id=' . $invoice['id'];
+                $detailUrl = $baseUrl . '/sales-invoice/detail.do?id=' . $invoice['id'];
                 $promises[$invoice['id']] = $client->getAsync($detailUrl, [
                     'headers' => [
                         'Authorization' => 'Bearer ' . $apiToken,
@@ -271,8 +272,10 @@ class FakturPenjualanController extends Controller
             return back()->with('error', 'Kredensial API Accurate untuk cabang ini belum diatur.');
         }
 
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
+
         // Get delivery orders in real-time from Accurate API
-        $deliveryOrders = $this->getDeliveryOrdersFromAccurate($branch);
+        $deliveryOrders = $this->getDeliveryOrdersFromAccurate($branch, $baseUrl);
 
         // Jika gagal mendapatkan data dari API, log error dan gunakan array kosong
         if (empty($deliveryOrders)) {
@@ -291,7 +294,7 @@ class FakturPenjualanController extends Controller
     /**
      * Get delivery orders data from Accurate API with caching and parallel processing
      */
-    private function getDeliveryOrdersFromAccurate(Branch $branch)
+    private function getDeliveryOrdersFromAccurate(Branch $branch, string $baseUrl)
     {
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
@@ -302,7 +305,7 @@ class FakturPenjualanController extends Controller
             Log::info('Mengambil data delivery orders dari API Accurate secara real-time');
 
             // Ambil semua delivery orders dengan pagination handling
-            $deliveryOrders = $this->fetchAllDeliveryOrders($apiToken, $signature, $timestamp, $branch);
+            $deliveryOrders = $this->fetchAllDeliveryOrders($apiToken, $signature, $timestamp, $branch, $baseUrl);
 
             if (!empty($deliveryOrders)) {
                 Log::info('Data delivery orders berhasil diambil dari API', ['count' => count($deliveryOrders)]);
@@ -325,9 +328,9 @@ class FakturPenjualanController extends Controller
     /**
      * Fetch all delivery orders with parallel processing dan pagination handling
      */
-    private function fetchAllDeliveryOrders($apiToken, $signature, $timestamp, Branch $branch)
+    private function fetchAllDeliveryOrders($apiToken, $signature, $timestamp, Branch $branch, string $baseUrl)
     {
-        $deliveryOrderApiUrl = 'https://iris.accurate.id/accurate/api/delivery-order/list.do';
+        $deliveryOrderApiUrl = $baseUrl . '/delivery-order/list.do';
         $data = [
             'sp.page' => 1,
             'sp.pageSize' => 20,
@@ -447,11 +450,12 @@ class FakturPenjualanController extends Controller
         // Get API credentials from branch (auto-decrypted by model accessors)
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
+        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
         // Define the API URL for delivery order detail
-        $detailApiUrl = 'https://iris.accurate.id/accurate/api/delivery-order/detail.do';
+        $detailApiUrl = $baseUrl . '/delivery-order/detail.do';
 
         try {
             // Make API request to get delivery order detail
@@ -617,6 +621,7 @@ class FakturPenjualanController extends Controller
             // Get API credentials from branch (auto-decrypted by model accessors)
             $apiToken = $branch->accurate_api_token;
             $signatureSecret = $branch->accurate_signature_secret;
+            $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
             $timestamp = Carbon::now()->toIso8601String();
             $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
@@ -633,7 +638,7 @@ class FakturPenjualanController extends Controller
                         'Authorization' => 'Bearer ' . $apiToken,
                         'X-Api-Signature' => $signature,
                         'X-Api-Timestamp' => $timestamp,
-                    ])->get('https://iris.accurate.id/accurate/api/sales-order/detail.do', [
+                    ])->get($baseUrl . '/sales-order/detail.do', [
                         'number' => $pengirimanPesanan->penjualan_id
                     ]);
 
@@ -750,7 +755,7 @@ class FakturPenjualanController extends Controller
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
                 'Content-Type'  => 'application/json',
-            ])->post('https://iris.accurate.id/accurate/api/sales-invoice/save.do', $postDataForAccurate);
+            ])->post($baseUrl . '/sales-invoice/save.do', $postDataForAccurate);
 
             // 4. Validasi response dari API Accurate
             if (!$response->successful()) {
@@ -847,6 +852,7 @@ class FakturPenjualanController extends Controller
             $signatureSecret = $branch->accurate_signature_secret;
             $timestamp = Carbon::now()->toIso8601String();
             $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
+            $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
 
             // 2. Buat instance HTTP client sekali untuk semua request
             $httpClient = Http::withHeaders([
@@ -870,7 +876,7 @@ class FakturPenjualanController extends Controller
             // 5. Selalu coba ambil data dari API terlebih dahulu
             // 5.1 Ambil detail faktur penjualan dari API
             if ($fakturPenjualan->no_faktur) {
-                $response = $httpClient->get('https://iris.accurate.id/accurate/api/sales-invoice/detail.do', [
+                $response = $httpClient->get($baseUrl . '/sales-invoice/detail.do', [
                     'number' => $fakturPenjualan->no_faktur,
                 ]);
 
@@ -894,7 +900,7 @@ class FakturPenjualanController extends Controller
 
             // 5.2 Ambil detail delivery order dari API
             if ($fakturPenjualan->pengiriman_id) {
-                $deliveryOrderResponse = $httpClient->get('https://iris.accurate.id/accurate/api/delivery-order/detail.do', [
+                $deliveryOrderResponse = $httpClient->get($baseUrl . '/delivery-order/detail.do', [
                     'number' => $fakturPenjualan->pengiriman_id,
                 ]);
 
@@ -905,7 +911,7 @@ class FakturPenjualanController extends Controller
 
             // 5.3 Ambil detail sales order dari API
             if ($pengirimanPesanan && $pengirimanPesanan->penjualan_id) {
-                $salesOrderResponse = $httpClient->get('https://iris.accurate.id/accurate/api/sales-order/detail.do', [
+                $salesOrderResponse = $httpClient->get($baseUrl . '/sales-order/detail.do', [
                     'number' => $pengirimanPesanan->penjualan_id,
                 ]);
 

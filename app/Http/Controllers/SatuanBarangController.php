@@ -14,6 +14,28 @@ use Illuminate\Support\Facades\Log;
 
 class SatuanBarangController extends Controller
 {
+    /**
+     * Membangun URL API dari url_accurate branch
+     * 
+     * @param Branch $branch Branch yang aktif
+     * @param string $endpoint Endpoint API (contoh: 'unit/list.do')
+     * @return string URL lengkap untuk API
+     */
+    private function buildApiUrl($branch, $endpoint)
+    {
+        // Gunakan url_accurate dari branch, jika tidak ada gunakan default
+        $baseUrl = $branch->url_accurate ?? 'https://iris.accurate.id';
+        $baseUrl = rtrim($baseUrl, '/');
+        $apiPath = '/accurate/api';
+        
+        // Jika url_accurate sudah termasuk path /accurate/api, gunakan langsung
+        if (strpos($baseUrl, '/accurate/api') !== false) {
+            return $baseUrl . '/' . ltrim($endpoint, '/');
+        }
+        
+        return $baseUrl . $apiPath . '/' . ltrim($endpoint, '/');
+    }
+
     public function index(Request $request)
     {
         // Validasi cabang aktif
@@ -58,7 +80,7 @@ class SatuanBarangController extends Controller
         $signatureSecret = $branch->accurate_signature_secret;
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
-        $apiUrl = 'https://iris.accurate.id/accurate/api/unit/list.do';
+        $apiUrl = $this->buildApiUrl($branch, 'unit/list.do');
 
         $satuanBarang = [];
         $apiSuccess = false;

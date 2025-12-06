@@ -101,6 +101,7 @@
                         <div class="h-full relative" data-branch-id="{{ $branch->id }}"
                             data-branch-name="{{ $branch->name }}" data-branch-photo="{{ $branch->photo ?? '' }}"
                             data-branch-customer="{{ $branch->customer_id ?? '' }}"
+                            data-branch-url-accurate="{{ $branch->url_accurate ?? '' }}"
                             data-branch-auth-accurate="{{ $branch->auth_accurate ?? '' }}"
                             data-branch-session-accurate="{{ $branch->session_accurate ?? '' }}"
                             data-branch-api-token="{{ $branch->accurate_api_token ?? '' }}"
@@ -187,6 +188,11 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Customer ID</label>
                         <input type="text" name="customer_id" required class="w-full border rounded px-3 py-2">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">URL Accurate</label>
+                        <input type="text" name="url_accurate" placeholder="https://iris.accurate.id/accurate/api"
+                            class="w-full border rounded px-3 py-2">
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Foto</label>
@@ -283,6 +289,11 @@
                         <label class="block text-sm font-medium text-gray-700">Customer ID</label>
                         <input type="text" name="customer_id" id="editCustomerId" required
                             class="w-full border rounded px-3 py-2">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">URL Accurate</label>
+                        <input type="text" name="url_accurate" id="editUrlAccurate"
+                            placeholder="https://iris.accurate.id/accurate/api" class="w-full border rounded px-3 py-2">
                     </div>
                     <div id="currentLogo" class="mt-2"></div>
                     <div>
@@ -450,6 +461,7 @@
                 card.getAttribute('data-branch-name'),
                 card.getAttribute('data-branch-photo'),
                 card.getAttribute('data-branch-customer') ?? '',
+                card.getAttribute('data-branch-url-accurate') ?? '',
                 card.getAttribute('data-branch-auth-accurate') ?? '',
                 card.getAttribute('data-branch-session-accurate') ?? '',
                 card.getAttribute('data-branch-api-token') ?? '',
@@ -457,13 +469,14 @@
             );
         }
 
-        function openEditModal(id, name, photo, customer, authAccurate, sessionAccurate, apiToken, signatureSecret) {
+        function openEditModal(id, name, photo, customer, urlAccurate, authAccurate, sessionAccurate, apiToken, signatureSecret) {
             document.getElementById('editModal').classList.remove('hidden');
             const form = document.getElementById('editForm');
             form.action = `/branch/${id}`;
 
             document.getElementById('editName').value = name || '';
             document.getElementById('editCustomerId').value = customer || '';
+            document.getElementById('editUrlAccurate').value = urlAccurate || '';
 
             document.getElementById('editAuthAccurate').value = authAccurate || '';
             document.getElementById('editSessionAccurate').value = sessionAccurate || '';
