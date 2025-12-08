@@ -17,6 +17,28 @@ use Illuminate\Support\Facades\Cache;
 
 class DashboardController extends Controller
 {
+    /**
+     * Membangun URL API dari url_accurate branch
+     * 
+     * @param Branch $branch Branch yang aktif
+     * @param string $endpoint Endpoint API (contoh: 'sales-order/detail.do')
+     * @return string URL lengkap untuk API
+     */
+    private function buildApiUrl($branch, $endpoint)
+    {
+        // Gunakan url_accurate dari branch, jika tidak ada gunakan default
+        $baseUrl = $branch->url_accurate ?? 'https://iris.accurate.id';
+        $baseUrl = rtrim($baseUrl, '/');
+        $apiPath = '/accurate/api';
+        
+        // Jika url_accurate sudah termasuk path /accurate/api, gunakan langsung
+        if (strpos($baseUrl, '/accurate/api') !== false) {
+            return $baseUrl . '/' . ltrim($endpoint, '/');
+        }
+        
+        return $baseUrl . $apiPath . '/' . ltrim($endpoint, '/');
+    }
+
     public function dashboard(Request $request)
     {
         // Validasi active_branch session
@@ -48,7 +70,6 @@ class DashboardController extends Controller
         // Get API credentials from branch (auto-decrypted by model accessors)
         $apiToken = $branch->accurate_api_token;
         $signatureSecret = $branch->accurate_signature_secret;
-        $baseUrl = rtrim($branch->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
         $timestamp = Carbon::now()->toIso8601String();
         $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
 
@@ -112,7 +133,7 @@ class DashboardController extends Controller
                     $totalBarangAccurate = Cache::get($barangCacheKey);
                     Log::info('Total barang Accurate diambil dari cache: ' . $totalBarangAccurate);
                 } else {
-                    $apiUrl = $baseUrl . '/item/list.do';
+                    $apiUrl = $this->buildApiUrl($branch, 'item/list.do');
                     $fields = 'name,no,itemTypeName,unit1,availableToSell';
 
                     $firstPageResponse = Http::withHeaders([
@@ -143,7 +164,7 @@ class DashboardController extends Controller
                     $totalAvailableToSell = Cache::get($availableToSellCacheKey);
                     Log::info('Total availableToSell diambil dari cache: ' . $totalAvailableToSell);
                 } else {
-                    $apiUrl = $baseUrl . '/item/list.do';
+                    $apiUrl = $this->buildApiUrl($branch, 'item/list.do');
                     $fields = 'availableToSell';
 
                     // Mengambil semua data barang untuk menghitung total availableToSell
@@ -223,7 +244,7 @@ class DashboardController extends Controller
                     continue;
                 }
 
-                $salesData = $this->getSalesOrderData($item->npj, $apiToken, $signature, $timestamp, $activeBranchId);
+                $salesData = $this->getSalesOrderData($item->npj, $branch, $apiToken, $signature, $timestamp, $activeBranchId);
 
                 if ($salesData) {
                     $totalAmountKeseluruhan += $salesData['totalAmount'];
@@ -351,7 +372,7 @@ class DashboardController extends Controller
     /**
      * Get sales order data with cache as fallback
      */
-    private function getSalesOrderData($npj, $apiToken, $signature, $timestamp, $activeBranchId = null)
+    private function getSalesOrderData($npj, $branch, $apiToken, $signature, $timestamp, $activeBranchId = null)
     {
         $cacheKey = 'accurate_sales_order_' . $npj;
         if ($activeBranchId) {
@@ -366,7 +387,7 @@ class DashboardController extends Controller
                 'Authorization' => 'Bearer ' . $apiToken,
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
-            ])->get($baseUrl . '/sales-order/detail.do', [
+            ])->get($this->buildApiUrl($branch, 'sales-order/detail.do'), [
                 'number' => $npj,
             ]);
 
