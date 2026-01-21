@@ -2,133 +2,250 @@
 <html lang="en">
 
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Jet Dyeing Monitor | Log in</title>
 
-    <!-- Google Font: Source Sans Pro -->
-    <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,400i,700&display=fallback">
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="{{ asset('lte/plugins/fontawesome-free/css/all.min.css') }}">
-    <!-- icheck bootstrap -->
-    <link rel="stylesheet" href="{{ asset('lte/plugins/icheck-bootstrap/icheck-bootstrap.min.css') }}">
-    <!-- Theme style -->
-    <link rel="stylesheet" href="{{ asset('lte/dist/css/adminlte.min.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <link rel="icon" type="png" href="{{ asset('images/logo.svg') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
+    <link type="text/css" rel="stylesheet" href="{{ asset('css/style.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fjalla+One&family=Poppins:ital,wght@1,800&family=Roboto:wght@900&family=Ubuntu:wght@700&display=swap"
+        rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <style>
         body {
-            background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
-            height: 100vh;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            position: relative;
+            background-image: url('{{ asset('images/bg1.jpg') }}');
             background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        body::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: -1;
+        }
+
+        .container {
             display: flex;
-            align-items: center;
+            flex-direction: column;
             justify-content: center;
+            align-items: center;
+            min-height: 100vh;
         }
 
         .login-box {
-            width: 400px;
-            max-width: 90%;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 10px;
+            padding: 20px;
+            width: 90%;
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 20px;
         }
 
-        .login-logo a {
-            color: #fff !important;
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+        .login-box img {
+            max-width: 100px;
+            height: auto;
+            transform: rotateY(15deg);
+            transition: transform 0.3s ease;
         }
 
-        .card {
-            border-radius: 12px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        .login-box img:hover {
+            transform: rotateY(0deg);
         }
 
-        .login-card-body {
-            border-radius: 12px;
-            padding: 25px;
+        i {
+            font-size: 25px;
+            padding: 10px;
         }
 
-        @media (max-width: 576px) {
-            /* HP kecil */
-            .login-box {
-                width: 90%;
+        h3 {
+            font-family: 'Poppins', sans-serif;
+            font-size: 24px;
+        }
+
+        label {
+            font-size: 18px;
+            font-family: 'Fjalla One', sans-serif;
+        }
+
+        input {
+            font-family: 'Roboto', sans-serif;
+            font-size: 16px;
+        }
+
+        .btn-primary {
+            font-size: 18px;
+        }
+
+        #login {
+            font-family: 'Ubuntu', sans-serif;
+        }
+
+        @media (max-width: 768px) {
+            h3 {
+                font-size: 20px;
             }
 
-            .login-logo a {
-                font-size: 1.5rem;
+            label {
+                font-size: 16px;
+            }
+
+            input {
+                font-size: 14px;
+            }
+
+            .btn-primary {
+                font-size: 16px;
             }
         }
 
-        @media (min-width: 577px) and (max-width: 768px) {
-            /* Tablet */
-            .login-box {
-                width: 70%;
+        footer {
+            padding: 10px;
+            border-top: 1px solid #ccc;
+        }
+
+        footer p {
+            margin: 0;
+            font-size: 14px;
+            color: #ffffff
+        }
+
+        .shake {
+            animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+            transform-origin: center;
+        }
+
+
+        .float-end {
+            float: right;
+        }
+
+
+        @keyframes beat {
+
+            0%,
+            100% {
+                transform: scale(1);
             }
+
+            50% {
+                transform: scale(1.1);
+            }
+        }
+
+        @keyframes shake {
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            10%,
+            30%,
+            50%,
+            70%,
+            90% {
+                transform: translateX(-5px);
+            }
+
+            20%,
+            40%,
+            60%,
+            80% {
+                transform: translateX(5px);
+            }
+        }
+
+        @keyframes rotateContinuously {
+            0% {
+                transform: rotateY(0deg);
+            }
+
+            100% {
+                transform: rotateY(360deg);
+            }
+
+
+        }
+
+        .rotate-3d {
+            max-width: 100px;
+            height: auto;
+            animation: rotateContinuously 5s linear infinite;
+        }
+
+        .icon-beat {
+            animation: beat 2s ease infinite;
         }
     </style>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-gH2yIJqKdNHPEq0n4Mqa/HGKIhSkIHeL5AyhkYV8i59U5AR6csBvApHHNl/vI1Bx" crossorigin="anonymous">
+    <title>Login - Taka Dashboard</title>
+    <link type="text/css" rel="stylesheet" href="{{ asset('css/app.css') }}">
+
 </head>
+<?php
+$rand = rand(999, 100);
+?>
 
-<body class="hold-transition">
-    <div class="login-box">
-        <div class="login-logo">
-            <a href="#"><b>DUNIA</b>TECH</a>
-        </div>
+<body>
+    <div class="container">
+        <div class="login-box w-60 text-center">
+            <img src="{{ asset('images/logopanjang.svg') }}" alt="Logo Perusahaan" class="mb-3 ">
+            <h3 class="mb-4">ACCOUNT LOGIN</h3>
 
-        <div class="card">
-            <div class="card-body login-card-body">
-                <p class="login-box-msg">Masuk untuk memulai</p>
-
-                <form action="{{ route('login-proses') }}" method="POST">
-                    @csrf
-                    <div class="input-group mb-3">
-                        <input type="text" name="username" class="form-control" placeholder="Username"
-                            value="{{ old('username') }}" required autofocus>
-                        <div class="input-group-append">
-                            <div class="input-group-text">
-                                <span class="fas fa-user"></span>
-                            </div>
-                        </div>
-                    </div>
+            <form action="{{ route('login-proses') }}" method="POST">
+                @csrf
+                <div class="mb-3 text-start">
+                    <label for="username" class="form-label"><i
+                            class="fas fa-user icon-beat @error('username') shake @enderror"></i> Username</label>
+                    <input type="username" value="{{ old('username') }}" name="username" class="form-control"
+                        placeholder="Masukkan Username Anda" required>
                     @error('username')
-                        <div class="text-danger text-sm mb-2">{{ $message }}</div>
+                        <span class="text-danger">{{ $message }}</span>
                     @enderror
-
-                    <div class="input-group mb-3">
-                        <input type="password" name="password" class="form-control" placeholder="Password"
-                            value="{{ old('password') }}" required>
-                        <div class="input-group-append">
-                            <div class="input-group-text">
-                                <span class="fas fa-lock"></span>
-                            </div>
-                        </div>
+                </div>
+                <div class="mb-3 text-start">
+                    <label for="password" class="form-label"><i
+                            class="fas fa-lock icon-beat @error('password') shake @enderror"></i> Password</label>
+                    <div class="password-input">
+                        <input type="password" id="password" name="password" class="form-control"
+                            placeholder="Masukkan Password Anda" required>
                     </div>
                     @error('password')
-                        <div class="text-danger text-sm mb-2">{{ $message }}</div>
+                        <span class="text-danger">{{ $message }}</span>
                     @enderror
-
-                    <div class="row">
-                        <div class="col-8">
-                            <div class="icheck-primary">
-                                <input type="checkbox" id="remember" name="remember"
-                                    {{ old('remember') ? 'checked' : '' }}>
-                                <label for="remember">
-                                    Ingat Saya
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-4">
-                            <button type="submit" class="btn btn-primary btn-block">Sign In</button>
-                        </div>
-                    </div>
-                </form>
-            </div>
+                </div>
+                <div id="login" class="mb-1 d-grid gap-3 col-6 mx-auto">
+                    <button name="submit" type="submit" class="btn btn-primary">LOGIN</button>
+                </div>
+            </form>
         </div>
+        <footer class="text-center">
+            <p>&copy; 2025 TAKA TEXTILES. Hak Cipta Dilindungi.</p>
+        </footer>
     </div>
 
     <!-- jQuery -->
     <script src="{{ asset('lte/plugins/jquery/jquery.min.js') }}"></script>
     <!-- Bootstrap 4 -->
     <script src="{{ asset('lte/plugins/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
-    <!-- AdminLTE App -->
-    <script src="{{ asset('lte/dist/js/adminlte.min.js') }}"></script>
     <!-- SweetAlert2 -->
     <script src="{{ asset('lte/plugins/sweetalert2/sweetalert2.min.js') }}"></script>
     <!-- Toastr -->
