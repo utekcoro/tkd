@@ -60,6 +60,25 @@ return [
             'report' => false,
         ],
 
+        'sftp_source' => [
+            'driver' => 'sftp',
+            'host' => env('SFTP_HOST_SOURCE', '10.11.12.15'),
+            'username' => env('SFTP_USERNAME_SOURCE', 'eapadm'),
+            'password' => env('SFTP_PASSWORD_SOURCE', '|!d6Ni@=Tx{}'),
+            'port' => (int) env('SFTP_PORT_SOURCE', 2217),
+            'root' => env('SFTP_ROOT_SOURCE', '/usr/sap/EAP/D20/takatiki'),
+            'timeout' => 30,
+        ],
+
+        'sftp_target' => [
+            'driver' => 'sftp',
+            'host' => env('SFTP_HOST_TARGET', '151.106.120.213'),
+            'username' => env('SFTP_USERNAME_TARGET', 'root'),
+            'password' => env('SFTP_PASSWORD_TARGET', "Xq7jxCuP),D.C.#QiMb'"),
+            'port' => (int) env('SFTP_PORT_TARGET', 22),
+            'root' => env('SFTP_ROOT_TARGET', '/'),
+            'timeout' => 30,
+        ],
     ],
 
     /*

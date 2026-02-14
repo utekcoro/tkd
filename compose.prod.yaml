@@ -95,6 +95,30 @@ services:
       timeout: 5s
       retries: 3
 
+  # Scheduler: menjalankan Laravel schedule (cron) terpisah dari php-fpm.
+  # Schedule 'files:transfer' di Kernel.php berjalan setiap jam 3 pagi (Asia/Jakarta).
+  # Menggunakan 'schedule:work' agar task terjadwal (mis. dailyAt 03:00) dieksekusi otomatis.
+  scheduler:
+    build:
+      context: .
+      dockerfile: ./docker/common/php-fpm/Dockerfile
+      target: production
+    restart: unless-stopped
+    command: php artisan schedule:work
+    environment:
+      - TZ=Asia/Jakarta
+    volumes:
+      - laravel-public-assets:/var/www/public/build
+      - laravel-storage-production:/var/www/storage
+      - /opt/sftp-uploads:/var/www/storage/sftp-uploads
+    env_file:
+      - .env
+    networks:
+      - laravel-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 networks:
   # Attach the service to the 'laravel' network.
   # -----------------------------------------------------------
