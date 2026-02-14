@@ -91,8 +91,9 @@ COPY --from=builder /usr/local/bin/docker-php-ext-* /usr/local/bin/
 # -----------------------------------------------------------
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
-# Enable PHP-FPM status page by modifying zz-docker.conf with sed
-RUN sed -i '/\[www\]/a pm.status_path = /status' /usr/local/etc/php-fpm.d/zz-docker.conf
+# Enable PHP-FPM status page for healthcheck (php-fpm-healthcheck)
+# pm.status_path must be inside [www] pool; use www.conf (zz-docker.conf may cause "unknown entry")
+RUN sed -i '/^\[www\]$/a pm.status_path = /status' /usr/local/etc/php-fpm.d/www.conf
 # Update the variables_order to include E (for ENV)
 #RUN sed -i 's/variables_order = "GPCS"/variables_order = "EGPCS"/' "$PHP_INI_DIR/php.ini"
 
