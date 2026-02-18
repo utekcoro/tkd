@@ -65,4 +65,13 @@ class Branch extends Model
     {
         return $value ? Crypt::decryptString($value) : null;
     }
+
+    /**
+     * Base URL untuk API Accurate (berdasarkan column url_accurate).
+     * Digunakan oleh model-model yang memanggil API Accurate agar URL konsisten per cabang.
+     */
+    public function getAccurateApiBaseUrl(): string
+    {
+        return rtrim($this->url_accurate ?? 'https://iris.accurate.id/accurate/api', '/');
+    }
 }

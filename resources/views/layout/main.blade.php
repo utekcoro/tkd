@@ -354,9 +354,9 @@
                         </li>
 
                         <li
-                            class="nav-item {{ Request::routeIs('pesanan_pembelian.*') || Request::routeIs('penerimaan-barang.*') || Request::routeIs('pemasok.*') ? 'menu-open' : '' }}">
+                            class="nav-item {{ Request::routeIs('pesanan_pembelian.*') || Request::routeIs('penerimaan-barang.*') || Request::routeIs('pemasok.*') || Request::routeIs('retur_pembelian.*') ? 'menu-open' : '' }}">
                             <a href="#"
-                                class="nav-link {{ Request::routeIs('pesanan_pembelian.*') || Request::routeIs('penerimaan-barang.*') || Request::routeIs('pemasok.*') ? 'active' : '' }}">
+                                class="nav-link {{ Request::routeIs('pesanan_pembelian.*') || Request::routeIs('penerimaan-barang.*') || Request::routeIs('pemasok.*') || Request::routeIs('retur_pembelian.*')? 'active' : '' }}">
                                 <i class="nav-icon fa-solid fa-cart-shopping"></i>
                                 <p>Pembelian <i class="right fas fa-angle-left"></i></p>
                             </a>
@@ -376,6 +376,13 @@
                                     </a>
                                 </li>
                                 <li class="nav-item">
+                                    <a href="{{ route('retur_pembelian.index') }}"
+                                        class="nav-link {{ Request::is('retur-pembelian*') ? 'active' : '' }}">
+                                        <i class="far fa-circle nav-icon"></i>
+                                        <p>Retur Pembelian</p>
+                                    </a>
+                                </li>
+                                <li class="nav-item">
                                     <a href="{{ route('pemasok.index') }}"
                                         class="nav-link {{ Request::is('pemasok*') ? 'active' : '' }}">
                                         <i class="far fa-circle nav-icon"></i>
@@ -386,9 +393,9 @@
                         </li>
 
                         <li
-                            class="nav-item {{ Request::routeIs('pelanggan.*') || Request::routeIs('cashier.*') || Request::routeIs('pengiriman_pesanan.*') || Request::routeIs('faktur_penjualan.*') ? 'menu-open' : '' }}">
+                            class="nav-item {{ Request::routeIs('pelanggan.*') || Request::routeIs('cashier.*') || Request::routeIs('pengiriman_pesanan.*') || Request::routeIs('faktur_penjualan.*') || Request::routeIs('retur_penjualan.*') ? 'menu-open' : '' }}">
                             <a href="#"
-                                class="nav-link {{ Request::routeIs('pelanggan.*') || Request::routeIs('cashier.*') || Request::routeIs('pengiriman_pesanan.*') || Request::routeIs('faktur_penjualan.*') ? 'active' : '' }}">
+                                class="nav-link {{ Request::routeIs('pelanggan.*') || Request::routeIs('cashier.*') || Request::routeIs('pengiriman_pesanan.*') || Request::routeIs('faktur_penjualan.*') || Request::routeIs('retur_penjualan.*') ? 'active' : '' }}">
                                 <i class="nav-icon fas fa-tags"></i>
                                 <p>Penjualan <i class="right fas fa-angle-left"></i></p>
                             </a>
@@ -428,6 +435,13 @@
                                         class="nav-link {{ Request::routeIs('faktur_penjualan.*') ? 'active' : '' }}">
                                         <i class="far fa-circle nav-icon"></i>
                                         <p>Faktur Penjualan</p>
+                                    </a>
+                                </li>
+                                <li class="nav-item">
+                                    <a href="{{ route('retur_penjualan.index') }}"
+                                        class="nav-link {{ Request::routeIs('retur_penjualan.index') ? 'active' : '' }}">
+                                        <i class="far fa-circle nav-icon"></i>
+                                        <p>Retur Penjualan</p>
                                     </a>
                                 </li>
                             </ul>
@@ -571,7 +585,9 @@
                 '#faktur_penjualan',
                 '#pesanan_pembelian',
                 '#approval_stock',
-                '#penerimaan_barang'
+                '#penerimaan_barang',
+                '#retur_pembelian',
+                '#retur_penjualan'
             ];
             let initialized = 0;
 

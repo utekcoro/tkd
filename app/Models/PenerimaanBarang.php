@@ -164,7 +164,7 @@ class PenerimaanBarang extends Model
             }
 
             // 2. Jika tidak ada di database lokal, cek API dengan pagination
-            $lastNpbFromAPI = self::getLastNpbFromAPI($apiToken, $signatureSecret, $prefix);
+            $lastNpbFromAPI = self::getLastNpbFromAPI($apiToken, $signatureSecret, $prefix, $branch);
 
             if ($lastNpbFromAPI) {
                 $lastIter = (int)substr($lastNpbFromAPI, strrpos($lastNpbFromAPI, '.') + 1);
@@ -193,11 +193,12 @@ class PenerimaanBarang extends Model
     }
 
     /**
-     * Get last npb from API dengan proper pagination dan sorting
+     * Get last npb from API dengan proper pagination dan sorting.
+     * URL dibangun dari Branch.url_accurate.
      */
-    private static function getLastNpbFromAPI($apiToken, $signatureSecret, $prefix)
+    private static function getLastNpbFromAPI($apiToken, $signatureSecret, $prefix, Branch $branch)
     {
-        $baseUrl = 'https://iris.accurate.id/accurate/api/receive-item/list.do';
+        $baseUrl = $branch->getAccurateApiBaseUrl() . '/receive-item/list.do';
         $currentYear = Carbon::now()->format('Y');
         $currentMonth = Carbon::now()->format('m');
         $allReceiveItems = [];

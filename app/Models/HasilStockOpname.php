@@ -164,13 +164,17 @@ class HasilStockOpname extends Model
                 
                 return "{$prefix}{$formattedIter}";
             }
+
+            // If no local entry exists, fall back to API call (URL dari Branch.url_accurate)
+            $baseUrl = $branch->getAccurateApiBaseUrl();
+            $listApiUrl = $baseUrl . '/stock-opname-result/list.do';
             
             // If no local entry exists, fall back to API call
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $apiToken,
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
-            ])->get('https://iris.accurate.id/accurate/api/stock-opname-result/list.do');
+            ])->get($listApiUrl);
     
             if ($response->successful()) {
                 $responseData = $response->json();
@@ -181,7 +185,7 @@ class HasilStockOpname extends Model
                     $lastResult = collect($responseData['d'])->sortByDesc('id')->first();
     
                     if ($lastResult) {
-                        $detailApiUrl = 'https://iris.accurate.id/accurate/api/stock-opname-result/detail.do?id=' . $lastResult['id'];
+                        $detailApiUrl = $baseUrl . '/stock-opname-result/detail.do?id=' . $lastResult['id'];
                         
                         // Generate new timestamp and signature for detail request
                         $detailTimestamp = Carbon::now()->toIso8601String();

@@ -19,6 +19,8 @@ use App\Http\Controllers\PenerimaanBarangController;
 use App\Http\Controllers\PengirimanPesananController;
 use App\Http\Controllers\PerintahStockOpnameController;
 use App\Http\Controllers\PesananPembelianController;
+use App\Http\Controllers\ReturPembelianController;
+use App\Http\Controllers\ReturPenjualanController;
 use App\Http\Controllers\SalesController;
 use App\Http\Controllers\SatuanBarangController;
 use App\Http\Controllers\SuratJalanController;
@@ -81,6 +83,14 @@ Route::middleware(['auth'])->group(function () {
     // Activity Log - For Non-Owner
     Route::get('/activity-log', [ActivityLogController::class, 'index'])->name('activity_logs.index');
 
+    // Retur Penjualan - Full Access
+    Route::get('/retur-penjualan', [ReturPenjualanController::class, 'index'])->name('retur_penjualan.index');
+    Route::get('/retur-penjualan/detail/{no_retur}', [ReturPenjualanController::class, 'show'])->name('retur_penjualan.detail');
+
+    // Retur Pembelian - Full Access
+    Route::get('/retur-pembelian', [ReturPembelianController::class, 'index'])->name('retur_pembelian.index');
+    Route::get('/retur-pembelian/detail/{no_retur}', [ReturPembelianController::class, 'show'])->name('retur_pembelian.detail');
+
     // Route yang hanya bisa diakses oleh admin
     Route::middleware('role:super_admin')->group(function () {
         Route::get('/user', [UserController::class, 'index'])->name('user.index');
@@ -133,6 +143,20 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/faktur-penjualan/create', [FakturPenjualanController::class, 'create'])->name('faktur_penjualan.create');
         Route::get('/faktur-penjualan/customer/{number}', [FakturPenjualanController::class, 'getCustomerByAjax'])->name('faktur_penjualan.getCustomer');
         Route::post('/faktur-penjualan/store', [FakturPenjualanController::class, 'store'])->name('faktur_penjualan.store');
+
+        // Retur Penjualan - For Non-Owner
+        Route::get('/retur-penjualan/create', [ReturPenjualanController::class, 'create'])->name('retur_penjualan.create');
+        Route::get('/retur-penjualan/delivery-orders', [ReturPenjualanController::class, 'getDeliveryOrdersAjax'])->name('retur_penjualan.delivery_orders');
+        Route::get('/retur-penjualan/sales-invoices', [ReturPenjualanController::class, 'getSalesInvoicesAjax'])->name('retur_penjualan.sales_invoices');
+        Route::get('/retur-penjualan/referensi-detail', [ReturPenjualanController::class, 'getReferensiDetailAjax'])->name('retur_penjualan.referensi_detail');
+        Route::post('/retur-penjualan/store', [ReturPenjualanController::class, 'store'])->name('retur_penjualan.store');
+
+        // Retur Pembelian - For Non-Owner
+        Route::get('/retur-pembelian/create', [ReturPembelianController::class, 'create'])->name('retur_pembelian.create');
+        Route::get('/retur-pembelian/receive-items', [ReturPembelianController::class, 'getReceiveItemsAjax'])->name('retur_pembelian.receive_items');
+        Route::get('/retur-pembelian/invoices', [ReturPembelianController::class, 'getInvoicesAjax'])->name('retur_pembelian.invoices');
+        Route::get('/retur-pembelian/referensi-detail', [ReturPembelianController::class, 'getReferensiDetailAjax'])->name('retur_pembelian.referensi_detail');
+        Route::post('/retur-pembelian/store', [ReturPembelianController::class, 'store'])->name('retur_pembelian.store');
     });
 
     Route::get('/profile', [UserController::class, 'editProfile'])->name('user.profile');

@@ -165,7 +165,7 @@ class PengirimanPesanan extends Model
             }
 
             // 2. Jika tidak ada di database lokal, cek API dengan pagination
-            $lastNoPengirimanFromAPI = self::getLastNoPengirimanFromAPI($apiToken, $signatureSecret, $prefix);
+            $lastNoPengirimanFromAPI = self::getLastNoPengirimanFromAPI($apiToken, $signatureSecret, $prefix, $branch);
 
             if ($lastNoPengirimanFromAPI) {
                 $lastIter = (int)substr($lastNoPengirimanFromAPI, strrpos($lastNoPengirimanFromAPI, '.') + 1);
@@ -194,11 +194,12 @@ class PengirimanPesanan extends Model
     }
 
     /**
-     * Get last no_pengiriman from API dengan proper pagination dan sorting
+     * Get last no_pengiriman from API dengan proper pagination dan sorting.
+     * URL dibangun dari Branch.url_accurate.
      */
-    private static function getLastNoPengirimanFromAPI($apiToken, $signatureSecret, $prefix)
+    private static function getLastNoPengirimanFromAPI($apiToken, $signatureSecret, $prefix, Branch $branch)
     {
-        $baseUrl = 'https://iris.accurate.id/accurate/api/delivery-order/list.do';
+        $baseUrl = $branch->getAccurateApiBaseUrl() . '/delivery-order/list.do';
         $currentYear = Carbon::now()->format('Y');
         $allDeliveryOrders = [];
         $page = 1;

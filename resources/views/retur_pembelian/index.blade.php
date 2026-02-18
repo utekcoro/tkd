@@ -7,12 +7,12 @@
         <div class="container-fluid">
             <div class="row mb-2">
                 <div class="col-sm-6">
-                    <h1 class="m-0">Kasir</h1>
+                    <h1 class="m-0">Retur Pembelian</h1>
                 </div>
                 <div class="col-sm-6">
                     <ol class="breadcrumb float-sm-right">
                         <li class="breadcrumb-item"><a href="{{ route('dashboard') }}">Home</a></li>
-                        <li class="breadcrumb-item active">Kasir</li>
+                        <li class="breadcrumb-item active">Retur Pembelian</li>
                     </ol>
                 </div>
 
@@ -32,10 +32,11 @@
             @endif
             <div class="row">
                 <div class="col-12">
+
                     <!-- Add Button -->
                     @if (Auth::user()->role != 'owner')
                     <div class="d-flex justify-content-end mb-3">
-                        <a href="{{ route('cashier.create') }}" class="btn btn-primary">
+                        <a href="{{ route('retur_pembelian.create') }}" class="btn btn-primary">
                             <i class="fas fa-plus"></i> Add
                         </a>
                     </div>
@@ -45,7 +46,7 @@
                     <div class="card">
                         <div class="card-header">
                             <div class="d-flex justify-content-between align-items-center">
-                                <h3 class="card-title">Data Pesanan Penjualan</h3>
+                                <h3 class="card-title">Data Retur Pembelian</h3>
                                 <button type="button" class="btn btn-primary btn-sm" onclick="refreshCache()">
                                     <i class="fas fa-sync-alt"></i> Refresh Data
                                 </button>
@@ -53,60 +54,25 @@
                         </div>
 
                         <div class="card-body">
-                            <table id="barang_masuk" class="table table-head-fixed text-nowrap">
+                            <table id="retur_pembelian" class="table table-head-fixed text-nowrap">
                                 <thead>
                                     <tr>
                                         <th>Nomor #</th>
                                         <th>Tanggal</th>
-                                        <th>Pelanggan</th>
+                                        <th>Pemasok</th>
                                         <th>Keterangan</th>
-                                        <th>Status</th>
                                         <th>Total</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach ($kasirPenjualan as $item)
+                                    @foreach ($returPembelian as $item)
                                     <tr>
-                                        <td><a
-                                                href="{{ route('cashier.detail', $item->npj) }}">{{ $item->npj }}</a></td>
-                                        <td>{{ \Carbon\Carbon::parse($item->tanggal)->format('d-m-Y') }}</td>
-                                        <td>{{ $detailPP[$item->npj]['customer_name'] ?? '-' }}</td>
-                                        <td>{{ $detailPP[$item->npj]['description'] ?? '-' }}</td>
-                                        <td>{{ $detailPP[$item->npj]['status'] ?? '-' }}</td>
-                                        <td>{{ $detailPP[$item->npj]['total_amount'] ?? '-' }}</td>
+                                        <td><a href="{{ route('retur_pembelian.detail', $item['number'] ?? '#') }}">{{ $item['number'] ?? 'N/A' }}</a></td>
+                                        <td>{{ $item['transDate'] ?? 'dd/mm/yyyy' }}</td>
+                                        <td>{{ $item['vendor']['name'] ?? '-' }}</td>
+                                        <td>{{ $item['description'] ?? '-' }}</td>
+                                        <td>{{ $item['totalAmount'] ?? 0 }}</td>
                                     </tr>
-
-                                    <!-- Modal Hapus -->
-                                    <div class="modal fade" id="modal-hapus{{ $item->id }}">
-                                        <div class="modal-dialog">
-                                            <div class="modal-content">
-                                                <div class="modal-header">
-                                                    <h4 class="modal-title">Konfirmasi Hapus</h4>
-                                                    <button type="button" class="close" data-dismiss="modal"
-                                                        aria-label="Close">
-                                                        <span aria-hidden="true">&times;</span>
-                                                    </button>
-                                                </div>
-                                                <div class="modal-body">
-                                                    <p>Apakah anda yakin ingin menghapus
-                                                        <strong>{{ $item->nbrg }}</strong>?
-                                                    </p>
-                                                </div>
-                                                <div class="modal-footer justify-content-between">
-                                                    <button type="button" class="btn btn-default"
-                                                        data-dismiss="modal">Batal</button>
-                                                    <form action="{{ route('barang-masuk.destroy', $item->id) }}"
-                                                        method="POST">
-                                                        @csrf
-                                                        @method('DELETE')
-                                                        <button type="submit" class="btn btn-danger">Ya,
-                                                            Hapus</button>
-                                                    </form>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <!-- End Modal -->
                                     @endforeach
                                 </tbody>
                             </table>
@@ -124,7 +90,7 @@
         document.title = pageTitle;
     }
 
-    updateTitle('Pesanan Penjualan');
+    updateTitle('Retur Pembelian');
 
     function refreshCache() {
         const button = event.target;
@@ -132,7 +98,7 @@
         const icon = button.querySelector('i');
         icon.classList.remove('fa-sync-alt');
         icon.classList.add('fa-spinner', 'fa-spin');
-        window.location.href = '{{ route("cashier.index") }}?force_refresh=1';
+        window.location.href = '{{ route("retur_pembelian.index") }}?force_refresh=1';
     }
 
     document.addEventListener('DOMContentLoaded', (event) => {

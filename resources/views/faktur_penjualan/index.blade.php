@@ -102,7 +102,7 @@
         const icon = button.querySelector('i');
         icon.classList.remove('fa-sync-alt');
         icon.classList.add('fa-spinner', 'fa-spin');
-        window.location.href = '{{ route("pesanan_pembelian.index") }}?force_refresh=1';
+        window.location.href = '{{ route("faktur_penjualan.index") }}?force_refresh=1';
     }
 
     document.addEventListener('DOMContentLoaded', (event) => {

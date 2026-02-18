@@ -167,15 +167,16 @@ class KasirPenjualan extends Model
                 return "{$prefix}{$formattedIter}";
             }
 
-            // If no local entry exists, fall back to API call
+            // If no local entry exists, fall back to API call (URL dari Branch.url_accurate)
             $timestamp = Carbon::now()->toIso8601String();
             $signature = hash_hmac('sha256', $timestamp, $signatureSecret);
+            $listApiUrl = $branch->getAccurateApiBaseUrl() . '/sales-order/list.do';
 
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $apiToken,
                 'X-Api-Signature' => $signature,
                 'X-Api-Timestamp' => $timestamp,
-            ])->get('https://iris.accurate.id/accurate/api/sales-order/list.do', [
+            ])->get($listApiUrl, [
                 'fields' => 'number',
             ]);
 
